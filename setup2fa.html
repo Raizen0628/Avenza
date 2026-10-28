@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Avenza – Set up 2-step verification</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <section id="setup" class="on auth" aria-label="Set up 2-step verification">
+
+    <form novalidate id="twofaForm">
+
+      <h1>Secure your account</h1>
+
+      <p class="sw">
+        1. Install <b>Google Authenticator</b> (or any authenticator app).<br>
+        2. Scan this QR code with the app.<br>
+        3. Type the 6-digit code it shows.
+      </p>
+
+      <div id="qr" style="justify-self:center; background:#fff; padding:12px; border-radius:14px; min-width:204px; min-height:204px;"></div>
+
+      <p class="sw">Can’t scan? Enter this key manually:<br><b id="key" style="word-break:break-all;">Loading…</b></p>
+
+      <div class="f">
+        <label for="code">6-digit code</label>
+        <input
+          id="code"
+          type="text"
+          inputmode="numeric"
+          maxlength="6"
+          autocomplete="one-time-code"
+          placeholder="123456"
+          required>
+      </div>
+
+      <p class="err" role="alert"></p>
+
+      <button type="submit">Turn on 2-step verification</button>
+
+    </form>
+
+    <div class="panel">
+      <img class="logo" alt="Avenza" src="logo.png">
+      <h2>Protect your account</h2>
+      <p>Each time you log in, you’ll enter a short code from your phone.</p>
+    </div>
+
+  </section>
+
+  <div class="ok" id="toast" role="status"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="script.js"></script>
+
+  <!-- NOTE: do NOT load guard.js on this page -->
+  <script type="module">
+    import { auth } from "./firebase-config.js";
+    import {
+      onAuthStateChanged,
+      multiFactor,
+      TotpMultiFactorGenerator
+    } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+    var form = document.getElementById("twofaForm");
+    var errBox = form.querySelector(".err");
+    var secret = null;
+    var currentUser = null;
+
+    function fail(e) {
+      console.error("2FA setup error:", e.code, e.message);
+      var map = {
+        "auth/invalid-verification-code": "That code is wrong or expired. Try the new one.",
+        "auth/requires-recent-login": "Please log in again, then retry.",
+        "auth/unverified-email": "Verify your email first, then try again.",
+        "auth/operation-not-allowed": "2-step verification (TOTP) is not turned on in Firebase yet."
+      };
+      errBox.textContent = map[e.code] || "Something went wrong. Please try again.";
+    }
+
+    onAuthStateChanged(auth, async function (user) {
+      if (!user) { location.href = "login.html"; return; }
+      currentUser = user;
+
+      if (multiFactor(user).enrolledFactors.length > 0) {
+        location.href = "dashboard.html";
+        return;
+      }
+
+      try {
+        var session = await multiFactor(user).getSession();
+        secret = await TotpMultiFactorGenerator.generateSecret(session);
+
+        var uri = secret.generateQrCodeUrl(user.email, "Avenza");
+        new QRCode(document.getElementById("qr"), { text: uri, width: 180, height: 180 });
+        document.getElementById("key").textContent = secret.secretKey;
+      } catch (e) {
+        document.getElementById("key").textContent = "Unavailable";
+        fail(e);
+      }
+    });
+
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      errBox.textContent = "";
+
+      var code = document.getElementById("code").value.trim();
+      if (!/^\d{6}$/.test(code)) { errBox.textContent = "Enter the 6-digit code."; return; }
+      if (!secret) { errBox.textContent = "Setup isn’t ready yet. Refresh the page."; return; }
+
+      try {
+        var assertion = TotpMultiFactorGenerator.assertionForEnrollment(secret, code);
+        await multiFactor(currentUser).enroll(assertion, "Authenticator app");
+        note("2-step verification is on!");
+        setTimeout(function () { location.href = "dashboard.html"; }, 1000);
+      } catch (err) {
+        fail(err);
+      }
+    });
+  </script>
+</body>
+
+</html>
