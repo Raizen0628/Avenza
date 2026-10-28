@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -22,45 +21,57 @@
     <!-- Welcome / Splash Screen -->
     <section id="splash" class="splash on" aria-label="Avenza Welcome">
 
-        <!-- Logo -->
-        <img
-            class="logo"
-            src="logo.png"
-            alt="Avenza Logo"
-        >
+        <!-- FIRST SCREEN: full-screen slideshow -->
+        <div class="screen">
 
-        <!-- Tagline -->
-        <p class="tag">Your Future, Our Support</p>
+            <!-- SLIDESHOW (dots are created automatically by script.js) -->
+            <div class="stage">
+                <div class="slider" id="slider" aria-roledescription="carousel" aria-label="Avenza pictures">
 
-        <!-- Loading Progress Bar -->
-        <div
-            class="bar"
-            role="progressbar"
-            aria-label="Loading"
-        >
-            <i id="fill"></i>
+                    <figure class="slide active">
+                        <img src="smlogo.jpg" alt="Picture 1">
+                    </figure>
+                    <figure class="slide">
+                        <img src="smf1.png" alt="Picture 2">
+                    </figure>
+                    <figure class="slide">
+                        <img src="smf2.png" alt="Picture 3">
+                    </figure>
+                    <figure class="slide">
+                        <img src="smf3.png" alt="Picture 4">
+                    </figure>
+                    <figure class="slide">
+                        <img src="smf4.png" alt="Picture 5">
+                    </figure>
+                    <figure class="slide">
+                        <img src="smf5.png" alt="Picture 6">
+                    </figure>
+                    <figure class="slide">
+                        <img src="smf6.png" alt="Picture 7">
+                    </figure>
+
+                    <button type="button" class="arrow prev" aria-label="Previous picture">&#8249;</button>
+                    <button type="button" class="arrow next" aria-label="Next picture">&#8250;</button>
+
+                    <div class="dots"></div>
+                </div>
+            </div>
         </div>
 
-        <!-- Navigation Buttons -->
-        <div class="actions">
-            <button type="button" data-go="signup">
-                Get started
-            </button>
+        <!-- BELOW: logo, tagline, buttons -->
+        <div class="bottom">
+            <img class="logo" src="logo.png" alt="Avenza Logo">
+            <p class="tag">Your Future, Our Support</p>
 
-            <button type="button" class="alt" data-go="login">
-                Log in
-            </button>
+            <div class="actions">
+                <button type="button" data-go="signup">Get started</button>
+                <button type="button" class="alt" data-go="login">Log in</button>
+            </div>
         </div>
-
     </section>
 
     <!-- Notification / Toast -->
-    <div
-        class="ok"
-        id="toast"
-        role="status"
-        aria-live="polite"
-    ></div>
+    <div class="ok" id="toast" role="status" aria-live="polite"></div>
 
     <!-- JavaScript -->
     <script src="script.js"></script>
