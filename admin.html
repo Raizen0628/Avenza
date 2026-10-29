@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Avenza – Admin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css">
+  <style>body { visibility: hidden; }</style>
+</head>
+<body data-need="admin">
+  <div class="app">
+    <aside class="side">
+      <img class="logo" src="logo.png" alt="Avenza">
+      <nav id="nav"></nav>
+      <a class="logout" href="index.html">⎋ Log out</a>
+    </aside>
+    <main>
+      <header class="top">
+        <h1 class="page-title" id="ptitle">Dashboard</h1>
+        <div class="user"><span class="avatar">A</span> Admin</div>
+      </header>
+      <div id="view"><p class="spin">Loading…</p></div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="guard.js"></script>
+  <script type="module" src="admin.js"></script>
+</body>
+</html>

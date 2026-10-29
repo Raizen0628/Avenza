@@ -1,82 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Avenza – Dashboard</title>
+  <title>Avenza – Student</title>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="dashboard.css">
   <style>body { visibility: hidden; }</style>
 </head>
-
 <body>
   <div class="app">
-
-    <!-- Sidebar -->
     <aside class="side">
       <img class="logo" src="logo.png" alt="Avenza">
       <nav id="nav"></nav>
       <a class="logout" href="index.html">⎋ Log out</a>
     </aside>
-
     <main>
-      <!-- Top bar -->
       <header class="top">
-        <input id="search" type="search" placeholder="Search scholarships, events, or anything...">
-        <button class="bell" id="bell" aria-label="Notifications">🔔<i></i></button>
+        <h1 class="page-title" id="ptitle">Home</h1>
+        <button class="bell" id="bell" aria-label="Notifications">🔔<i id="dot" hidden></i></button>
         <div class="user"><span class="avatar">S</span> Hi, Student</div>
       </header>
-
-      <!-- Banner -->
-      <section class="banner">
-        <div>
-          <h1>DASHBOARD</h1>
-          <p>Take the next step toward your goals. Explore available scholarships and manage your applications all in one place.</p>
-        </div>
-        <span class="cap" aria-hidden="true">🎓</span>
-      </section>
-
-      <!-- Stats -->
-      <section class="stats" id="stats"></section>
-
-      <div class="cols">
-        <div class="col">
-          <section class="card">
-            <div class="head"><h2>Your Application Status</h2><a href="#">View All Applications</a></div>
-            <div id="apps"></div>
-          </section>
-
-          <section class="card">
-            <div class="head"><h2>Recommended Scholarships</h2></div>
-            <div class="recs" id="recs"></div>
-            <p class="empty" id="empty" hidden>No scholarships match your search.</p>
-          </section>
-        </div>
-
-        <div class="col">
-          <section class="card">
-            <div class="head"><h2>New Announcements</h2><a href="#">View All</a></div>
-            <ul class="list" id="news"></ul>
-          </section>
-
-          <section class="card">
-            <div class="head"><h2>Upcoming Deadlines</h2><a href="#">View Calendar</a></div>
-            <ul class="list" id="deadlines"></ul>
-          </section>
-
-          <section class="card">
-            <div class="head"><h2>Quick Access</h2></div>
-            <div class="quick" id="quick"></div>
-          </section>
-        </div>
-      </div>
+      <div id="view"><p class="spin">Loading…</p></div>
     </main>
   </div>
-
   <div class="toast" id="toast" role="status"></div>
-  <script src="dashboard.js"></script>
   <script type="module" src="guard.js"></script>
+  <script type="module" src="dashboard.js"></script>
 </body>
-
 </html>
