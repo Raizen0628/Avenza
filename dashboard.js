@@ -19,7 +19,7 @@ const $ = id => document.getElementById(id);
 const TITLES = { home: "Home", apply: "Apply for Exam", browse: "Browse Scholarships", scholarship: "Scholarship", announcements: "Announcements", profile: "Profile" };
 let page = "home";
 
-const ICON = { home: "", apply: "", browse: "", scholarship: "", announcements: "📢", profile: "" };
+const ICON = { home: "", apply: "", browse: "", scholarship: "", announcements: "", profile: "" };
 const navHtml = () => Object.entries(TITLES).map(([k, v]) => `<button data-p="${k}"><span class="ic">${ICON[k]}</span>${v}</button>`).join("");
 $("nav").innerHTML = navHtml();
 
