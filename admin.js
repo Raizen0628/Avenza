@@ -4,6 +4,19 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/fi
 import { doc, getDoc, setDoc, updateDoc, addDoc, getDocs, collection, arrayUnion, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
+const MAIL_FN = "https://oqpgvxaswfpcjonglrdy.supabase.co/functions/v1/notify-email";
+async function mailIt(to, text) {
+  if (!to || !text) return;
+  try {
+    const token = await auth.currentUser.getIdToken();
+    await fetch(MAIL_FN, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ to, text })
+    });
+  } catch (e) { console.warn("Email not sent:", e); }
+}
+
 const $ = id => document.getElementById(id);
 const S = {};
 const TITLES = { apps: "Examination Applications", sched: "Exam Scheduling", res: "Exam Results", docs: "Document Verification", schos: "Scholarships", sapps: "Scholarship Applications", sch: "Program Information", ann: "Announcements", people: "Applicant Management" };
@@ -107,7 +120,10 @@ function render() {
 async function act(id, changes, log, note) {
   try {
     await updateDoc(doc(db, "applications", id), { ...changes, history: arrayUnion(history(S.u.email, log)) });
-    if (note) await addDoc(collection(db, "notifications"), { uid: id, text: note, ts: serverTimestamp() });
+    if (note) {
+      await addDoc(collection(db, "notifications"), { uid: id, text: note, ts: serverTimestamp() });
+      mailIt((S.apps.find(a => a.id === id) || {}).email, note);
+    }
     await load(); toast("Saved: " + log);
   } catch (e) { console.error(e); toast("Failed: " + (e.code || e.message) + ". Nothing was changed."); }
 }
@@ -115,7 +131,9 @@ async function docAct(id, status, reason, note) {
   try {
     const d = S.docs.find(x => x.id === id);
     await updateDoc(doc(db, "documents", id), { status, reason, reviewedBy: S.u.email });
-    await addDoc(collection(db, "notifications"), { uid: d.uid, text: note.replace("{n}", d.name) + (reason ? " Reason: " + reason : ""), ts: serverTimestamp() });
+    const msg = note.replace("{n}", d.name) + (reason ? " Reason: " + reason : "");
+    await addDoc(collection(db, "notifications"), { uid: d.uid, text: msg, ts: serverTimestamp() });
+    mailIt((S.apps.find(a => a.id === d.uid) || {}).email, msg);
     await updateDoc(doc(db, "applications", d.uid), { history: arrayUnion(history(S.u.email, `${d.name}: ${status}`)) });
     await load(); toast("Saved.");
   } catch (e) { console.error(e); toast("Failed: " + (e.code || e.message)); }
@@ -124,7 +142,9 @@ async function docAct(id, status, reason, note) {
 async function sAct(x, status, reason) {
   try {
     await updateDoc(doc(db, "scholarshipApps", x.id), { status, reason, reviewedBy: S.u.email, history: arrayUnion(history(S.u.email, `Scholarship application ${status}`)) });
-    await addDoc(collection(db, "notifications"), { uid: x.uid, text: `Your application for ${x.schoName} was ${status}.` + (reason ? " Reason: " + reason : ""), ts: serverTimestamp() });
+    const msg = `Your application for ${x.schoName} was ${status}.` + (reason ? " Reason: " + reason : "");
+    await addDoc(collection(db, "notifications"), { uid: x.uid, text: msg, ts: serverTimestamp() });
+    mailIt(x.email, msg);
     await load(); toast("Saved.");
   } catch (e) { console.error(e); toast("Failed: " + (e.code || e.message) + ". Nothing was changed."); }
 }
