@@ -56,6 +56,25 @@ const notify = (text) => addDoc(collection(db, "notifications"), { uid: S.u.uid,
 const profDone = () => !!(S.prof.name && S.prof.phone && S.prof.school && S.prof.course);
 const a = () => S.app;
 const resultOut = () => a()?.result?.published ? a().result.status : null;
+
+/* Scholarship rules: pass the exam first, and only ONE scholarship per student.
+   Any scholarship application that is not rejected counts (pending or approved). */
+const passedExam = () => resultOut() === "passed";
+const activeSapp = () => Object.values(S.sapps).find(m => m.status !== "rejected");
+const canApply = s => passedExam() && (!activeSapp() || activeSapp().schoId === s.id);
+const gateNote = () => {
+  if (!passedExam()) {
+    const res = resultOut();
+    return `<p class="note">${res === "failed"
+      ? "You did not pass the examination, so scholarship applications are not available."
+      : a() ? "Scholarship applications open after you pass the exam."
+      : "Apply for the scholarship exam first. Scholarship applications open after you pass it."}</p>`;
+  }
+  const cur = activeSapp();
+  return cur
+    ? `<p class="note">You already applied for ${esc(cur.schoName)}. Only one scholarship is allowed per student.</p>`
+    : `<p class="note">You passed the exam. You may apply for one scholarship.</p>`;
+};
 const docsList = () => S.set.docs;
 const allDocs = st => docsList().length && docsList().every((_, i) => st.includes(S.docs["d" + i]?.status));
 
@@ -96,14 +115,14 @@ const pages = {
   },
   browse() {
     const list = S.schos.filter(s => isOpen(s) || S.sapps[s.id]);
-    return `<section class="card"><div class="head"><h2>Available scholarships</h2></div><p class="note">Choose a scholarship, check the requirements, then apply. An admin will review your application and notify you.</p></section>` +
+    return `<section class="card"><div class="head"><h2>Available scholarships</h2></div><p class="note">Choose a scholarship, check the requirements, then apply. An admin will review your application and notify you.</p>${gateNote()}</section>` +
       (list.length ? list.map(s => {
         const m = S.sapps[s.id], open = isOpen(s);
         return `<section class="card"><div class="head"><h2>${esc(s.name)}</h2>${m ? tag(cap(m.status)) : tag(open ? "Open" : "Closed")}</div>
         <small>${esc(s.provider)}</small><p style="font-size:.85rem;line-height:1.7">${esc(s.description)}</p>
         <div class="row"><div><b>Requirements</b><small>${esc(reqText(s))}</small></div></div>
         <div class="row"><div><b>Deadline</b><small>${s.deadline ? esc(s.deadline) : "No deadline"}${s.slots ? " · " + s.slots + " slots" : ""}</small></div></div>
-        ${m ? (m.status === "rejected" && m.reason ? `<p class="note">Reason: ${esc(m.reason)}</p>` : m.status === "approved" ? `<p class="note">Congratulations! You were approved for this scholarship.</p>` : `<p class="note">Your application is pending review.</p>`) : open ? `<p><button class="btn" data-sa="${esc(s.id)}">Apply</button></p>` : ""}</section>`;
+        ${m ? (m.status === "rejected" && m.reason ? `<p class="note">Reason: ${esc(m.reason)}</p>` : m.status === "approved" ? `<p class="note">Congratulations! You were approved for this scholarship.</p>` : `<p class="note">Your application is pending review.</p>`) : open && canApply(s) ? `<p><button class="btn" data-sa="${esc(s.id)}">Apply</button></p>` : ""}</section>`;
       }).join("") : `<section class="card"><p class="empty">No scholarships are open right now.</p></section>`);
   },
   announcements() {
@@ -157,6 +176,9 @@ document.addEventListener("click", async e => {
   if (sa) {
     const s = S.schos.find(x => x.id === sa.dataset.sa);
     if (!s || S.sapps[s.id]) return;
+    if (!passedExam()) { toast("Pass the scholarship exam first."); return; }
+    const cur = activeSapp();
+    if (cur && cur.schoId !== s.id) { toast("You already applied for " + cur.schoName + ". Only one scholarship is allowed."); return; }
     if (!profDone()) { toast("Complete your profile first."); go("profile"); return; }
     const r = await ask("Apply · " + s.name, [
       { k: "gwa", label: "GWA (%)", req: 1 },

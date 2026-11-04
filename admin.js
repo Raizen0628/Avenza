@@ -54,6 +54,20 @@ const btn = (act, id, label, cls = "") => `<button class="sm ${cls}" data-a="${a
 const card = (h, body) => `<section class="card"><div class="head"><h2>${h}</h2></div>${body}</section>`;
 const nm = a => `<b>${esc(a.name)}</b><br><small>${esc(a.appId)}</small>`;
 
+let docUser = null; /* applicant whose documents are open in Document Verification */
+
+function docDetail(id) {
+  const a = S.apps.find(x => x.id === id) || { name: id, appId: "" }, ds = dstat(id);
+  const ok = ds.filter(d => d.status === "approved").length;
+  return `<p>${btn("dback", "", "← Back to applicants", "alt")}</p>` +
+    card(`${esc(a.name)} <small>${esc(a.appId)}</small>`, `<p class="note">${ok} of ${ds.length} documents approved.</p>` +
+      table(["Document", "Status", "Actions"], ds.map(d => [
+        `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.name)}</a><br><small>${esc(d.fileName)}</small>`,
+        tag(d.status === "correction" ? "Correction" : d.status[0].toUpperCase() + d.status.slice(1)) + (d.reason ? `<br><small>${esc(d.reason)}</small>` : ""),
+        d.status === "submitted" ? btn("dok", d.id, "Approve") + btn("dfix", d.id, "Request correction", "bad") : ""
+      ])));
+}
+
 const pages = {
   schos() {
     const used = s => S.sapps.filter(a => a.schoId === s.id && a.status === "approved").length;
@@ -95,11 +109,18 @@ const pages = {
       a.result.published ? "" : btn("pass", a.id, "Pass") + btn("fail", a.id, "Fail", "bad") + (a.result.status !== "awaiting" ? btn("pubres", a.id, "Publish") : "")]), ["Awaiting", "Passed", "Failed"]));
   },
   docs() {
-    return card("Submitted documents", table(["Applicant", "Document", "Status", "Actions"], S.docs.map(d => {
-      const a = S.apps.find(x => x.id === d.uid) || { name: d.uid, appId: "" };
-      return [nm(a), `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.name)}</a><br><small>${esc(d.fileName)}</small>`, tag(d.status === "correction" ? "Correction" : d.status[0].toUpperCase() + d.status.slice(1)) + (d.reason ? `<br><small>${esc(d.reason)}</small>` : ""),
-        d.status === "submitted" ? btn("dok", d.id, "Approve") + btn("dfix", d.id, "Request correction", "bad") : ""];
-    }), ["Submitted", "Approved", "Rejected", "Correction"]));
+    if (docUser) return docDetail(docUser);
+    const pending = id => dstat(id).filter(d => d.status === "submitted").length;
+    const ids = [...new Set(S.docs.map(d => d.uid))].sort((x, y) => pending(y) - pending(x));
+    return card("Applicants with submitted documents", table(["Applicant", "Approved", "Status", "Action"], ids.map(id => {
+      const a = S.apps.find(x => x.id === id) || { name: id, appId: "" }, ds = dstat(id);
+      const n = st => ds.filter(d => d.status === st).length, p = pending(id);
+      const tg = p ? tag("Submitted") + `<br><small>${p} to review</small>`
+        : n("correction") ? tag("Correction") + `<br><small>Waiting for resubmission</small>`
+        : n("rejected") ? tag("Rejected")
+        : tag("Approved");
+      return [nm(a), `${n("approved")} / ${ds.length}`, tg, btn("dview", id, "View documents")];
+    }), ["Submitted", "Correction", "Rejected", "Approved"]));
   },
   ann() {
     return `<p><button class="btn" data-a="newann">+ New announcement</button></p>` + card("Announcements", table(["Title", "Date", "Status", "Actions"], S.ann.map(n => [`<b>${esc(n.title)}</b><br><small>${esc(n.body)}</small>`, when(n.ts), tag(n.status === "published" ? "Published" : "Archived"), btn("editann", n.id, "Edit", "alt") + btn("togann", n.id, n.status === "published" ? "Archive" : "Publish")])));
@@ -157,9 +178,11 @@ document.addEventListener("input", e => {
 
 document.addEventListener("click", async e => {
   const n = e.target.closest("#nav [data-p]");
-  if (n) { page = n.dataset.p; render(); return; }
+  if (n) { page = n.dataset.p; docUser = null; render(); return; }
   const b = e.target.closest("[data-a]"); if (!b) return;
   const id = b.dataset.id, A = S.apps.find(x => x.id === id), k = b.dataset.a;
+  if (k === "dview") { docUser = id; render(); scrollTo(0, 0); return; }
+  if (k === "dback") { docUser = null; render(); return; }
   if (k === "approve" && await ask("Approve this application?", [], "Approve")) act(id, { "exam.status": "approved", "exam.reason": "" }, "Exam application approved", "Your examination application was approved. Your schedule will be posted soon.");
   if (k === "reject") { const r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Reject"); if (r) act(id, { "exam.status": "rejected", "exam.reason": r.r.trim() }, "Exam application rejected", "Your examination application was rejected. Reason: " + r.r.trim()); }
   if (k === "sched") { const v = A.schedule || {}, r = await ask("Exam schedule · " + A.name, [{ k: "date", label: "Date", type: "date", v: v.date, req: 1 }, { k: "time", label: "Time", type: "time", v: v.time, req: 1 }, { k: "location", label: "Location / meeting link", v: v.location, req: 1 }, { k: "notes", label: "Instructions", area: 1, v: v.notes }], "Publish"); if (r) act(id, { schedule: { ...r, published: true } }, A.schedule ? "Exam schedule changed" : "Exam schedule published", A.schedule ? "Your exam schedule was changed. Check Application Status." : "Your exam schedule is published. Check Application Status."); }
