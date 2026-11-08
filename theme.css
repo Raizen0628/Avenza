@@ -1,0 +1,230 @@
+/* ==========================================================
+   AVENZA – interface theme (loads after dashboard.css)
+   One accent colour, flat white surfaces, 1px borders, 8/12px radii,
+   Inter for reading, Montserrat for headings. Spacing: 4 / 8 / 12 / 16 / 24 / 32.
+   ========================================================== */
+:root {
+  --ink: #1d1a33;
+  --muted: #615c7c;
+  --brand: #5e3fc4;
+  --brand-dark: #4b31a3;
+  --brand-tint: #f0edfb;
+  --line: #e2dfee;
+  --bg: #f6f5fa;
+  --card: #fff;
+  --r: 8px;
+  --r-lg: 12px;
+  --ok: #17784a;     --ok-bg: #e3f4ea;
+  --wait: #8a5a00;   --wait-bg: #fdf1d6;
+  --bad: #b4234f;    --bad-bg: #fbe4eb;
+  --font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --head: Montserrat, Inter, system-ui, sans-serif;
+}
+
+html, body { background: var(--bg); }
+body { font-family: var(--font); color: var(--ink); font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, .page-title, .banner h1 { font-family: var(--head); }
+a { color: var(--brand); font-size: inherit; font-weight: 600; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.i { flex: none; vertical-align: -3px; }
+
+/* ----- Shell ----- */
+.side { border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: none; background: var(--card); }
+#nav button, .logout { border-radius: var(--r); font-weight: 500; font-size: .875rem; color: var(--muted); gap: 12px; }
+#nav button:hover, .logout:hover { background: var(--brand-tint); color: var(--ink); }
+#nav button.on { background: var(--brand-tint); color: var(--brand); font-weight: 600; }
+#nav button.on::before { display: none; }
+#nav .ic { display: grid; place-items: center; width: 20px; font-size: 0; }
+.logout { color: var(--bad); }
+.top { position: static; padding: 0; background: none; box-shadow: none; backdrop-filter: none; border-radius: 0; }
+.page-title { font-size: 1.25rem; font-weight: 700; color: var(--ink); letter-spacing: -.01em; }
+.bell { border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.bell:hover { background: var(--brand-tint); }
+.bell i { background: var(--bad); border: 2px solid var(--card); width: 11px; height: 11px; top: 6px; right: 7px; }
+.user { border: 1px solid var(--line); background: var(--card); font-weight: 600; }
+.avatar { background: var(--brand); }
+.role-badge, .state-badge { padding: 2px 8px; border-radius: 6px; font-size: .7rem; font-weight: 600; background: var(--brand-tint); color: var(--brand); }
+.pill { border-radius: 6px; }
+
+/* ----- Surfaces ----- */
+.card, .stat, .banner { border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: none; }
+.banner { background: var(--card); color: var(--ink); border-left: 4px solid var(--brand); }
+.banner h1 { letter-spacing: -.01em; font-size: 1.35rem; }
+.banner p { color: var(--muted); }
+.cap { display: none; }
+.stat { border-left-width: 1px; border-top: 3px solid var(--c); transition: none; }
+.stat:hover { transform: none; }
+.stat b { font-family: var(--head); }
+.head h2 { color: var(--ink); font-size: 1rem; font-weight: 700; }
+.cta { background: var(--brand-tint); }
+.cta h2 { color: var(--ink); }
+.row small, .stat small, small { line-height: 1.5; }
+
+/* ----- Status badges ----- */
+.tag { border-radius: 6px; padding: 3px 9px; font-size: .72rem; font-weight: 600; }
+.Declined, .Not-qualified { color: var(--bad); background: var(--bad-bg); }
+.Qualified { color: var(--ok); background: var(--ok-bg); }
+.Scheduled { color: var(--brand); background: var(--brand-tint); }
+
+/* ----- Buttons: solid accent, no gradients or lift ----- */
+.btn, button.sm, .dlg button, .acts button, .rec button, .btn.pick {
+  background: var(--brand); color: #fff; border: 1px solid var(--brand); border-radius: var(--r);
+  box-shadow: none; font-family: var(--font); font-weight: 600; font-size: .85rem; padding: 9px 16px; min-height: 38px;
+  transition: background .15s, border-color .15s;
+}
+button.sm { padding: 5px 12px; min-height: 0; font-size: .78rem; }
+.btn:hover, button.sm:hover, .dlg button:hover, .acts button:hover { background: var(--brand-dark); border-color: var(--brand-dark); filter: none; transform: none; }
+.btn.alt, button.sm.alt, .dlg button.alt, .acts button.alt { background: var(--card); color: var(--ink); border-color: var(--line); }
+.btn.alt:hover, button.sm.alt:hover, .dlg button.alt:hover { background: var(--brand-tint); border-color: var(--brand); }
+button.sm.bad, .dlg button.bad, .acts button.bad { background: var(--card); color: var(--bad); border-color: #e7b3c4; }
+button.sm.bad:hover, .dlg button.bad:hover { background: var(--bad-bg); border-color: var(--bad); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+input[type=file]::file-selector-button { border-radius: var(--r); background: var(--brand); }
+
+/* ----- Forms ----- */
+form.fm input, form.fm select, form.fm textarea, .dlg input, .dlg textarea, .tools input, .tools select, .fld input {
+  background: var(--card); border: 1px solid #cfcade; border-radius: var(--r); font-family: var(--font); font-size: .9rem; color: var(--ink); padding: 10px 12px;
+}
+form.fm input:focus, form.fm textarea:focus, .dlg input:focus, .dlg textarea:focus, .tools input:focus, .fld input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px #5e3fc41f; }
+form.fm label, .dlg label { font-weight: 600; font-size: .8rem; color: var(--ink); }
+.note { border-radius: var(--r); background: var(--brand-tint); color: var(--ink); border: 1px solid var(--line); }
+.note.warn { background: var(--wait-bg); border-color: #efd9a0; color: var(--wait); }
+.note.good { background: var(--ok-bg); border-color: #b9e2c9; color: var(--ok); }
+.chk { display: flex; gap: 8px; align-items: flex-start; font-weight: 500; font-size: .85rem; line-height: 1.5; }
+.chk input { width: auto; margin-top: 3px; accent-color: var(--brand); }
+
+/* ----- Tables ----- */
+.tw { border: 1px solid var(--line); border-radius: var(--r); }
+table { font-size: .85rem; }
+th { background: #faf9fd; text-transform: none; letter-spacing: 0; font-size: .75rem; font-weight: 600; color: var(--muted); }
+th:first-child { border-top-left-radius: var(--r); } th:last-child { border-top-right-radius: var(--r); }
+td { border-top: 1px solid var(--line); }
+tbody tr:hover { background: #faf9fd; }
+code { font: 500 .78rem ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--brand-tint); padding: 2px 6px; border-radius: 4px; }
+.empty { border: 1px dashed var(--line); border-radius: var(--r); background: #faf9fd; }
+
+/* ----- Dialogs ----- */
+dialog { border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 24px 64px rgba(29,26,51,.22); width: min(480px, 92vw); color: var(--ink); }
+dialog.wide { width: min(880px, 94vw); }
+dialog::backdrop { background: rgba(29,26,51,.45); }
+.dlg { padding: 24px; gap: 16px; max-height: 86vh; overflow: auto; }
+.dlg h3 { color: var(--ink); font-size: 1.1rem; }
+.dlg h4 { margin: 8px 0 4px; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.acts { padding-top: 8px; border-top: 1px solid var(--line); }
+.cols2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; }
+.files li { margin-bottom: 4px; }
+
+/* ----- Key / value summary ----- */
+dl.sum { display: grid; grid-template-columns: minmax(110px, 38%) 1fr; margin: 0; font-size: .875rem; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+dl.sum dt, dl.sum dd { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line); }
+dl.sum dt:first-of-type, dl.sum dt:first-of-type + dd { border-top: 0; }
+dl.sum dt { color: var(--muted); background: #faf9fd; }
+dl.sum dd { overflow-wrap: anywhere; }
+
+/* ----- Toast and loading ----- */
+.toast { border-radius: var(--r); background: var(--ink); font-weight: 500; padding: 12px 18px; }
+.spin { font-size: 0; height: 140px; border-radius: var(--r-lg); background: linear-gradient(90deg, #ecebf3 0, #f7f6fb 50%, #ecebf3 100%) 0 0 / 200% 100%; animation: shimmer 1.3s linear infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* ==========================================================
+   Enrollment page
+   ========================================================== */
+.en-body { display: block; min-height: 100vh; }
+.en-top { display: flex; justify-content: space-between; align-items: center; padding: 16px max(16px, 4vw); background: var(--card); border-bottom: 1px solid var(--line); }
+.en-top .logo { width: 120px; margin: 0; }
+.en-out { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .85rem; font-weight: 500; text-decoration: none; }
+.en-out:hover { color: var(--bad); text-decoration: none; }
+.en-wrap { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 24px; }
+.en-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); padding: clamp(20px, 4vw, 32px); display: grid; gap: 16px; }
+.en-card h1 { margin: 0; font-size: 1.35rem; letter-spacing: -.01em; }
+.lead { margin: 0; color: var(--muted); font-size: .9rem; }
+.en-steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; }
+.en-steps li { flex: 1; display: flex; align-items: center; gap: 8px; font-size: .78rem; font-weight: 600; color: var(--muted); padding-top: 12px; border-top: 3px solid var(--line); }
+.en-steps li.done { border-color: var(--ok); color: var(--ink); }
+.en-steps li.now { border-color: var(--brand); color: var(--brand); }
+.en-steps i { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--line); color: var(--muted); font-style: normal; font-size: .7rem; flex: none; }
+.en-steps li.done i { background: var(--ok); color: #fff; } .en-steps li.now i { background: var(--brand); color: #fff; }
+@media (max-width: 560px) { .en-steps span { display: none; } }
+.fgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 16px; }
+.fld { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.fld.wide { grid-column: 1 / -1; }
+.fld > label { font-size: .8rem; font-weight: 600; }
+.fld input { width: 100%; }
+.fld input[aria-invalid="true"] { border-color: var(--bad); box-shadow: 0 0 0 3px #b4234f1a; }
+@media (max-width: 560px) { .fgrid { grid-template-columns: 1fr; } }
+.fe { min-height: 1.1em; color: var(--bad); font-size: .78rem; }
+.form-err { min-height: 0; }
+.drop { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 16px; border: 1px dashed #bdb7d4; border-radius: var(--r); background: #faf9fd; }
+.drop.has { border-style: solid; border-color: #b9e2c9; background: #f3fbf6; }
+.drop b { display: block; font-size: .875rem; overflow-wrap: anywhere; }
+.drop small { color: var(--muted); }
+.btn.pick { display: inline-flex; cursor: pointer; flex: none; }
+.en-acts { display: flex; justify-content: space-between; gap: 12px; padding-top: 8px; }
+.state { justify-items: start; }
+.state-badge.wait { background: var(--wait-bg); color: var(--wait); } .state-badge.bad { background: var(--bad-bg); color: var(--bad); }
+blockquote { margin: 0; padding: 12px 16px; border-left: 3px solid var(--bad); background: #faf9fd; border-radius: 0 var(--r) var(--r) 0; font-size: .9rem; }
+
+/* ==========================================================
+   Enrollment polish
+   ========================================================== */
+
+/* Hide the empty toast (the dark bar at the bottom of the page) */
+.toast:not(.show) { display: none; }
+
+/* Form grid: real gap between fields, no wasted space */
+.fgrid { gap: 16px 24px; align-items: start; }
+.fgrid > * { min-width: 0; }
+.fld input, .fld select { width: 100%; min-height: 42px; }
+.fe:empty { min-height: 0; }
+.form-err:empty { display: none; }
+
+/* Progress bar spacing */
+.en-steps { margin-bottom: 8px; }
+
+/* Summary table: full width, no cramped wrapping */
+dl.sum { width: 100%; grid-template-columns: minmax(120px, 30%) 1fr; }
+
+/* Back / Continue buttons */
+.en-acts { align-items: center; margin-top: 8px; }
+.en-acts .btn, .en-acts button { min-width: 110px; }
+
+
+/* ===== Enrollment spacing fix ===== */
+.fgrid, .en-card .fgrid, .en-card form {
+  column-gap: 24px !important;
+  row-gap: 16px !important;
+}
+.fgrid, .en-card .fgrid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  align-items: start;
+}
+.fgrid .fld.wide { grid-column: 1 / -1; }
+@media (max-width: 560px) {
+  .fgrid, .en-card .fgrid { grid-template-columns: 1fr !important; }
+}
+.fld { gap: 6px; }
+.fld input, .fld select { width: 100%; min-height: 44px; box-sizing: border-box; }
+.fe { min-height: 0; }
+
+/* Review table: let long labels wrap instead of overlapping */
+dl.sum { grid-template-columns: minmax(140px, 34%) 1fr; }
+dl.sum dt, dl.sum dd { overflow-wrap: anywhere; word-break: break-word; }
+
+
+/* ===== Needed because enroll.html does not load dashboard.css ===== */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+img { max-width: 100%; }
+button, input, select, textarea { font: inherit; }
+.logo { display: block; height: auto; mix-blend-mode: multiply; }
+
+/* Toast: floating pill, only visible when shown */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; z-index: 1000;
+  max-width: calc(100vw - 32px); color: #fff; text-align: center;
+  transform: translateX(-50%);
+}
+.toast:not(.show) { display: none; }
+.spin { padding: 0; display: block; }

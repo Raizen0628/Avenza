@@ -1,6 +1,8 @@
 import { auth, db } from "./firebase-config.js";
-import { supabase } from "./supabase-config.js";
-import { esc, tag, when, toast, ask, history, cap, reqText, isOpen } from "./core.js";
+import { checkFile, uploadPrivate, extOf } from "./files.js";
+import { logAudit } from "./audit.js";
+import { icon } from "./icons.js";
+import { esc, tag, when, toast, ask, entry, cap, reqText, isOpen, meets } from "./core.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
 import { doc, getDoc, setDoc, updateDoc, addDoc, getDocs, collection, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
@@ -19,7 +21,7 @@ const $ = id => document.getElementById(id);
 const TITLES = { home: "Home", apply: "Apply for Exam", browse: "Browse Scholarships", scholarship: "Scholarship", announcements: "Announcements", profile: "Profile" };
 let page = "home";
 
-const ICON = { home: "", apply: "", browse: "", scholarship: "", announcements: "", profile: "" };
+const ICON = Object.fromEntries(Object.keys(TITLES).map(k => [k, icon(k)]));
 const navHtml = () => Object.entries(TITLES).map(([k, v]) => `<button data-p="${k}"><span class="ic">${ICON[k]}</span>${v}</button>`).join("");
 $("nav").innerHTML = navHtml();
 
@@ -52,6 +54,7 @@ async function load() {
   $("dot").hidden = !(S.notes.some(n => (n.ts?.seconds || 0) * 1000 > seen) || S.ann.some(n => (n.ts?.seconds || 0) * 1000 > seen));
 }
 
+const aud = o => logAudit(o).catch(e => console.warn("Audit not written:", e));
 const notify = (text) => addDoc(collection(db, "notifications"), { uid: S.u.uid, text, ts: serverTimestamp() });
 const profDone = () => !!(S.prof.name && S.prof.phone && S.prof.school && S.prof.course);
 const a = () => S.app;
@@ -97,7 +100,7 @@ const NOTE = `<p class="note">Supplied project information. Verify against the l
 const pages = {
   home() {
     const l = S.ann[0], A = a();
-    return `<section class="banner"><div><h1>Welcome, ${esc((S.prof.name || "Student").split(" ")[0])}</h1><p>Track your scholarship application in one place.</p></div><span class="cap">🎓</span></section>
+    return `<section class="banner"><div><h1>Welcome, ${esc((S.prof.name || "Student").split(" ")[0])}</h1><p>Track your scholarship application in one place.</p></div></section>
     ${A ? "" : `<section class="card cta"><div><h2>Apply for the scholarship exam</h2><p>Submit your application, then wait for the admin to approve it.</p></div><button class="btn" data-p="apply">Apply now</button></section>`}<div class="grid2"><section class="card"><div class="head"><h2>Application summary</h2></div>
       <div class="row"><div><b>Current stage</b><small>${esc(stage())}</small></div></div>
       <div class="row"><div><b>Application ID</b><small>${esc(A?.appId || "Not submitted yet")}</small></div></div>
@@ -188,12 +191,18 @@ document.addEventListener("click", async e => {
     if (!r) return;
     const f = { gwa: +r.gwa, income: +r.income, course: r.course.trim(), school: S.prof.school || "" };
     if (!(f.gwa >= 0 && f.gwa <= 100) || !(f.income >= 0)) { toast("Check your GWA and income values."); return; }
+    const miss = meets(s, f);
+    const summary = `<dl class="sum"><dt>Scholarship</dt><dd>${esc(s.name)}</dd><dt>GWA</dt><dd>${esc(f.gwa)}%</dd><dt>Household income</dt><dd>₱${f.income.toLocaleString()}</dd><dt>Course</dt><dd>${esc(f.course)}</dd></dl>`
+      + (miss.length ? `<p class="note warn">You may not meet: ${esc(miss.join("; "))}. You can still submit, and an admin makes the final decision.</p>` : `<p class="note good">You meet the listed requirements.</p>`)
+      + `<label class="chk"><input type="checkbox" required> I confirm these details are true and I understand that false information can disqualify me.</label>`;
+    if (!await ask("Review before you submit", [], "Submit application", summary)) return;
     try {
       await setDoc(doc(db, "scholarshipApps", `${S.u.uid}_${s.id}`), {
         uid: S.u.uid, schoId: s.id, schoName: s.name, name: S.prof.name, email: S.prof.email, form: f,
         status: "pending", reason: "", createdAt: serverTimestamp(),
-        history: [history("student", "Applied for " + s.name)]
+        history: [entry("student", "Applied for " + s.name)]
       });
+      aud({ action: "scholarship_app.submitted", targetType: "scholarshipApp", targetId: `${S.u.uid}_${s.id}`, summary: "Applied for " + s.name, after: f });
       await notify(`Your application for ${s.name} was submitted and is pending review.`);
       await reload(); toast("Application submitted. Status: Pending.");
     } catch (err) { console.error(err); toast("Failed: " + (err.code || err.message)); }
@@ -227,8 +236,9 @@ document.addEventListener("submit", async e => {
         uid: S.u.uid, appId, name: f.name.trim(), email: S.prof.email, createdAt: serverTimestamp(),
         exam: { status: "pending", reason: "", form: { school: f.school, strand: f.strand, gwa, income, course: f.course } },
         schedule: null, result: { status: "awaiting", published: false }, final: { decision: "pending", published: false },
-        history: [history("student", "Submitted examination application")]
+        history: [entry("student", "Submitted examination application")]
       });
+      aud({ action: "exam_app.submitted", targetType: "application", targetId: S.u.uid, summary: "Submitted examination application", after: { school: f.school, course: f.course, gwa, income } });
       await notify("Your examination application was submitted and is pending review.");
       await reload(); toast("Application submitted. Status: Pending Review.");
     }
@@ -238,16 +248,15 @@ document.addEventListener("submit", async e => {
 document.addEventListener("change", async e => {
   const inp = e.target.closest("input[type=file][data-k]");
   if (!inp || !inp.files[0]) return;
-  const file = inp.files[0], k = inp.dataset.k, ext = (file.name.split(".").pop() || "").toLowerCase();
-  if (!["pdf", "jpg", "jpeg", "png"].includes(ext)) { toast("Only PDF, JPG or PNG files are allowed."); inp.value = ""; return; }
-  if (file.size > 5 * 1024 * 1024) { toast("File is larger than 5 MB."); inp.value = ""; return; }
+  const file = inp.files[0], k = inp.dataset.k, ext = extOf(file);
+  const bad = await checkFile(file);
+  if (bad) { toast(bad); inp.value = ""; return; }
   inp.disabled = true; toast("Uploading…");
   try {
     const path = `${S.u.uid}/d${k}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from("docs").upload(path, file, { contentType: file.type });
-    if (error) throw { message: error.message };
-    const url = supabase.storage.from("docs").getPublicUrl(path).data.publicUrl;
-    await setDoc(doc(db, "documents", `${S.u.uid}_d${k}`), { uid: S.u.uid, key: "d" + k, name: docsList()[k], url, fileName: file.name, status: "submitted", reason: "", ts: serverTimestamp() });
+    await uploadPrivate(path, file);
+    await setDoc(doc(db, "documents", `${S.u.uid}_d${k}`), { uid: S.u.uid, key: "d" + k, name: docsList()[k], path, fileName: file.name, status: "submitted", reason: "", ts: serverTimestamp() });
+    aud({ action: "document.uploaded", targetType: "document", targetId: `${S.u.uid}_d${k}`, summary: `Uploaded ${docsList()[k]}`, after: { fileName: file.name } });
     await notify(`Document submitted: ${docsList()[k]}`);
     await reload(); toast("Upload successful. Waiting for review.");
   } catch (err) { console.error(err); toast("Upload failed: " + (err.code || err.message)); inp.disabled = false; }
