@@ -40,7 +40,7 @@ const STEPS = [
 const DOCS = [
   { key: "idFront", label: "Valid ID (front)" },
   { key: "idBack", label: "Valid ID (back)" },
-  { key: "proof", label: "Latest report card or proof of enrollment" }
+  { key: "proof", label: "Grade report (photo or PDF showing your GWA)" }
 ];
 
 /* ---------- State ---------- */

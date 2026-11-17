@@ -4,7 +4,7 @@
 import { auth } from "./firebase-config.js";
 import { supabase } from "./supabase-config.js";
 
-const FN = "https://oqpgvxaswfpcjonglrdy.supabase.co/functions/v1/file-url";
+const FN = "https://oqpgvxaswfpcjonglrdy.supabase.co/functions/v1/dynamic-function";
 const EXT = ["pdf", "jpg", "jpeg", "png"];
 const MAX = 5 * 1024 * 1024;
 
@@ -31,11 +31,16 @@ export async function uploadPrivate(path, file) {
 
 export async function signedUrl(path) {
   const token = await auth.currentUser.getIdToken();
-  const r = await fetch(FN, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-    body: JSON.stringify({ path })
-  });
+  let r;
+  try {
+    r = await fetch(FN, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ path })
+    });
+  } catch (e) {
+    throw new Error("The file viewer is not set up yet. Deploy the file-url function in Supabase.");
+  }
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.url) throw new Error(j.error || "Could not open the file");
   return j.url;

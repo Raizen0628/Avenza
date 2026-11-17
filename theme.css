@@ -165,66 +165,44 @@ dl.sum dd { overflow-wrap: anywhere; }
 .state-badge.wait { background: var(--wait-bg); color: var(--wait); } .state-badge.bad { background: var(--bad-bg); color: var(--bad); }
 blockquote { margin: 0; padding: 12px 16px; border-left: 3px solid var(--bad); background: #faf9fd; border-radius: 0 var(--r) var(--r) 0; font-size: .9rem; }
 
-/* ==========================================================
-   Enrollment polish
-   ========================================================== */
+/* ----- Browse scholarships ----- */
+.sch[hidden] { display: none !important; }
+.tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.tools input[type=search] { flex: 1 1 220px; min-width: 0; }
+.hico { display: inline-grid; place-items: center; width: 32px; height: 32px; margin-right: 8px; border-radius: var(--r); background: var(--brand-tint); color: var(--brand); vertical-align: middle; }
 
-/* Hide the empty toast (the dark bar at the bottom of the page) */
-.toast:not(.show) { display: none; }
+/* ----- Profile photo ----- */
+.pp { display: flex; gap: 16px; align-items: center; }
+.pp-img { width: 72px; height: 72px; border-radius: 50%; overflow: hidden; flex: none; background: var(--brand); color: #fff; display: grid; place-items: center; font: 700 1.5rem var(--head); }
+.pp-img img { width: 100%; height: 100%; object-fit: cover; }
+.top .avatar { background-position: center; background-size: cover; }
 
-/* Form grid: real gap between fields, no wasted space */
-.fgrid { gap: 16px 24px; align-items: start; }
-.fgrid > * { min-width: 0; }
-.fld input, .fld select { width: 100%; min-height: 42px; }
-.fe:empty { min-height: 0; }
-.form-err:empty { display: none; }
+/* ----- Help chat ----- */
+.chat { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 900; }
+.chat-fab { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 10px 16px; box-shadow: 0 8px 24px rgba(29,26,51,.22); }
+.chat-panel { position: absolute; right: 0; bottom: 56px; width: min(360px, calc(100vw - 32px)); max-height: min(520px, 70vh); display: grid; grid-template-rows: auto 1fr auto auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 24px 64px rgba(29,26,51,.25); overflow: hidden; }
+.chat-panel[hidden] { display: none; }
+.chat-panel header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); font-family: var(--head); }
+.chat-x { background: none; border: 0; color: var(--muted); font-size: 1.4rem; line-height: 1; padding: 0 4px; min-height: 0; cursor: pointer; box-shadow: none; }
+.chat-x:hover { background: none; color: var(--ink); border: 0; }
+.chat-log { overflow: auto; padding: 16px; display: grid; gap: 8px; align-content: start; }
+.msg { max-width: 88%; padding: 8px 12px; border-radius: var(--r); font-size: .85rem; white-space: pre-line; line-height: 1.5; }
+.msg.bot { background: var(--brand-tint); justify-self: start; }
+.msg.me { background: var(--brand); color: #fff; justify-self: end; }
+.chat-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 8px; }
+.chip { background: var(--card); color: var(--brand); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; min-height: 0; font-size: .75rem; font-weight: 500; text-align: left; }
+.chip:hover { background: var(--brand-tint); border-color: var(--brand); color: var(--brand); }
+.chat-form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+.chat-form input { flex: 1; min-width: 0; border: 1px solid #cfcade; border-radius: var(--r); padding: 8px 12px; font: inherit; }
 
-/* Progress bar spacing */
-.en-steps { margin-bottom: 8px; }
+/* ----- Enrollment page: inputs must not grow past their column ----- */
+.en-body, .en-body *, .en-body *::before, .en-body *::after { box-sizing: border-box; }
+.fgrid { gap: 8px 24px; }
 
-/* Summary table: full width, no cramped wrapping */
-dl.sum { width: 100%; grid-template-columns: minmax(120px, 30%) 1fr; }
+/* ----- Toast: hidden until shown (the enrollment page does not load dashboard.css) ----- */
+.toast { position: fixed; z-index: 1000; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); max-width: calc(100vw - 32px); color: #fff; text-align: center;
+  opacity: 0; visibility: hidden; pointer-events: none; transform: translate(-50%, 16px); transition: opacity .2s ease, transform .2s ease, visibility .2s; }
+.toast.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
 
-/* Back / Continue buttons */
-.en-acts { align-items: center; margin-top: 8px; }
-.en-acts .btn, .en-acts button { min-width: 110px; }
-
-
-/* ===== Enrollment spacing fix ===== */
-.fgrid, .en-card .fgrid, .en-card form {
-  column-gap: 24px !important;
-  row-gap: 16px !important;
-}
-.fgrid, .en-card .fgrid {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  align-items: start;
-}
-.fgrid .fld.wide { grid-column: 1 / -1; }
-@media (max-width: 560px) {
-  .fgrid, .en-card .fgrid { grid-template-columns: 1fr !important; }
-}
-.fld { gap: 6px; }
-.fld input, .fld select { width: 100%; min-height: 44px; box-sizing: border-box; }
-.fe { min-height: 0; }
-
-/* Review table: let long labels wrap instead of overlapping */
-dl.sum { grid-template-columns: minmax(140px, 34%) 1fr; }
-dl.sum dt, dl.sum dd { overflow-wrap: anywhere; word-break: break-word; }
-
-
-/* ===== Needed because enroll.html does not load dashboard.css ===== */
-*, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; }
-img { max-width: 100%; }
-button, input, select, textarea { font: inherit; }
-.logo { display: block; height: auto; mix-blend-mode: multiply; }
-
-/* Toast: floating pill, only visible when shown */
-.toast {
-  position: fixed; left: 50%; bottom: 24px; z-index: 1000;
-  max-width: calc(100vw - 32px); color: #fff; text-align: center;
-  transform: translateX(-50%);
-}
-.toast:not(.show) { display: none; }
-.spin { padding: 0; display: block; }
+/* ----- Enrollment page spacing ----- */
+#stage { display: grid; gap: 24px; }

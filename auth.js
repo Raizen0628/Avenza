@@ -1,4 +1,3 @@
-
 /* ==========================================================
    AVENZA – Firebase Authentication
    Email/password + Google + authenticator-app MFA
@@ -15,6 +14,9 @@ import {
   GoogleAuthProvider,
   sendPasswordResetEmail,
   getMultiFactorResolver,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   TotpMultiFactorGenerator,
   signOut
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
@@ -62,6 +64,10 @@ function friendly(error) {
     case "auth/network-request-failed":
       return "Network problem. Check your internet connection.";
 
+    case "auth/invalid-verification-code":
+    case "auth/code-expired":
+      return "That code is wrong or expired. Use the newest code from your app.";
+
     case "auth/operation-not-allowed":
       return "This sign-in method is not enabled in Firebase.";
 
@@ -72,6 +78,35 @@ function friendly(error) {
       return error.message || "Something went wrong. Please try again.";
   }
 }
+
+/* ---------- Failed-attempt limit (5 wrong passwords = 5 minute lock on this browser) ----------
+   Firebase also rate-limits on the server; this makes the limit visible to the user. */
+
+var MAX_TRIES = 5;
+var LOCK_MINUTES = 5;
+
+function triesKey(email) { return "avz_fail_" + email.toLowerCase(); }
+
+function readTries(email) {
+  try { return JSON.parse(localStorage.getItem(triesKey(email)) || "{}"); }
+  catch (e) { return {}; }
+}
+
+function lockMinutesLeft(email) {
+  var t = readTries(email);
+  return t.until && t.until > Date.now() ? Math.ceil((t.until - Date.now()) / 60000) : 0;
+}
+
+/* Returns how many attempts are left, or 0 when the account is now locked. */
+function recordFail(email) {
+  var t = readTries(email);
+  t.n = (t.n || 0) + 1;
+  if (t.n >= MAX_TRIES) { t.until = Date.now() + LOCK_MINUTES * 60000; t.n = 0; }
+  localStorage.setItem(triesKey(email), JSON.stringify(t));
+  return t.until && t.until > Date.now() ? 0 : MAX_TRIES - t.n;
+}
+
+function clearTries(email) { localStorage.removeItem(triesKey(email)); }
 
 /* ---------- After successful sign-in ---------- */
 
@@ -170,9 +205,22 @@ async function doLogin() {
     return;
   }
 
+  var mins = lockMinutesLeft(email);
+  if (mins) {
+    showErr("Too many wrong attempts. Try again in " + mins + " minute" + (mins === 1 ? "" : "s") + ".");
+    return;
+  }
+
+  var remember = form.querySelector('input[type="checkbox"]');
+  await setPersistence(
+    auth,
+    remember && remember.checked ? browserLocalPersistence : browserSessionPersistence
+  );
+
   var credential =
     await signInWithEmailAndPassword(auth, email, password);
 
+  clearTries(email);
   await afterLogin(credential.user);
 }
 
@@ -248,6 +296,12 @@ if (form) {
 
       if (error.code === "auth/multi-factor-auth-required") {
         needMfa(error);
+      } else if (mode !== "signup" && ["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found"].indexOf(error.code) >= 0) {
+        var typed = (document.getElementById("u") || {}).value || "";
+        var left = typed ? recordFail(typed.trim()) : 1;
+        showErr(left
+          ? friendly(error) + " " + left + " attempt" + (left === 1 ? "" : "s") + " left."
+          : "Too many wrong attempts. Try again in " + LOCK_MINUTES + " minutes.");
       } else {
         showErr(friendly(error));
       }

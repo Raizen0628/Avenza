@@ -33,22 +33,35 @@ export const entry = (by, text) => ({ t: Date.now(), by, text });
 /* ---------- Scholarship helpers (used by student + admin) ---------- */
 export const cap = s => s ? s[0].toUpperCase() + s.slice(1) : "";
 
-/* Returns a list of unmet requirements (empty list = meets all). f = { gwa, income, course }.
-   Blank or non-numeric answers count as NOT meeting a numeric requirement. */
+/* ---------- Scholarship coverage by GWA (25 / 50 / 75 / 100 %) ---------- */
+export const TIER_NAME = { 25: "Financial assistance", 50: "Half scholarship", 75: "Three-quarter scholarship", 100: "Full scholarship" };
 const num = v => (v === "" || v == null || !Number.isFinite(+v)) ? null : +v;
+
+/* GWA needed for each level. Older scholarships that only had a minimum GWA are scaled from it. */
+export const tiersOf = s => {
+  if (s.tiers) return { t25: +s.tiers.t25, t50: +s.tiers.t50, t75: +s.tiers.t75, t100: +s.tiers.t100 };
+  const b = +s.minGwa || 80;
+  return { t25: b, t50: Math.min(100, b + 5), t75: Math.min(100, b + 10), t100: Math.min(100, b + 15) };
+};
+export const coverage = (s, gwa) => {
+  const t = tiersOf(s), g = num(gwa);
+  return g === null ? 0 : g >= t.t100 ? 100 : g >= t.t75 ? 75 : g >= t.t50 ? 50 : g >= t.t25 ? 25 : 0;
+};
+export const coverText = p => p ? `${p}% · ${TIER_NAME[p]}` : "Not eligible";
+export const tierText = s => { const t = tiersOf(s); return [25, 50, 75, 100].map(p => `${p}% at GWA ${t["t" + p]}+`).join(" · "); };
+
+/* Returns a list of unmet requirements (empty list = meets all). f = { gwa, income }.
+   Blank or non-numeric answers count as NOT meeting a requirement. */
 export const meets = (s, f) => {
-  const miss = [], course = String(f.course || "").trim().toLowerCase(), gwa = num(f.gwa), income = num(f.income);
-  if (s.minGwa && (gwa === null || gwa < +s.minGwa)) miss.push(`GWA below ${s.minGwa}%`);
+  const miss = [], income = num(f.income);
+  if (coverage(s, f.gwa) === 0) miss.push(`GWA below ${tiersOf(s).t25}%`);
   if (s.maxIncome && (income === null || income > +s.maxIncome)) miss.push(`income above ₱${(+s.maxIncome).toLocaleString()}`);
-  const cs = s.courses || [];
-  if (cs.length && !cs.some(x => { x = x.toLowerCase(); return course && (course.includes(x) || x.includes(course)); })) miss.push("course not in the allowed list");
   return miss;
 };
 
 export const reqText = s => [
-  s.minGwa ? `GWA ${s.minGwa}% or higher` : "",
-  s.maxIncome ? `Household income ₱${(+s.maxIncome).toLocaleString()} or less` : "",
-  (s.courses || []).length ? `Courses: ${s.courses.join(", ")}` : ""
-].filter(Boolean).join(" · ") || "No specific requirements";
+  tierText(s),
+  s.maxIncome ? `Household income ₱${(+s.maxIncome).toLocaleString()} or less` : ""
+].filter(Boolean).join(" · ");
 
 export const isOpen = s => s.status === "open" && (!s.deadline || new Date(s.deadline + "T23:59:59") >= new Date());
