@@ -57,7 +57,7 @@ function table(cols, rows, statuses) {
 }
 const btn = (act, id, label, cls = "") => `<button class="sm ${cls}" data-a="${act}" data-id="${id}">${label}</button>`;
 const card = (h, body) => `<section class="card"><div class="head"><h2>${h}</h2></div>${body}</section>`;
-const nm = a => `<b>${esc(a.name)}</b><br><small>${esc(a.appId)}</small>`;
+const nm = a => `<b>${esc(a.name)}</b><br><small>${esc(a.appId)}${(a.examAttempt || 1) > 1 ? " · exam attempt " + a.examAttempt : ""}</small>`;
 
 let docUser = null; /* applicant whose documents are open in Document Verification */
 
@@ -79,7 +79,7 @@ const pages = {
     return `<section class="stats">${n("Submissions", S.enr.length, "var(--brand2)")}${n("Pending", c("pending"), "var(--wait)")}${n("Approved", c("approved"), "var(--ok)")}${n("Declined", c("declined"), "var(--bad)")}</section>`
       + card("Student enrollment", table(["Student", "School · Course", "Submitted", "Status", "Action"],
         S.enr.map(e => { const f = e.form || {};
-          return [`<b>${esc(f.name)}</b><br><small>${esc(e.email)}</small>`, `${esc(f.school)}<br><small>${esc(f.course)}</small>`, when(e.submittedAt),
+          return [`<b>${esc(f.name)}</b><br><small>${esc(e.email)}</small>`, `${esc(f.school)}<br><small>${esc(f.course)}</small>`, when(e.submittedAt) + `<br><small>Attempt ${e.attempt || 1}</small>`,
             tag(cap(e.status)) + (e.reason ? `<br><small>${esc(e.reason)}</small>` : ""),
             btn("enrview", e.id, e.status === "pending" ? "Review" : "View", e.status === "pending" ? "" : "alt")]; }), ["Pending", "Approved", "Declined"]));
   },
@@ -159,6 +159,7 @@ const pages = {
 };
 
 /* ---------- audit + review helpers ---------- */
+const ENROLL_MAX = 3; /* keep in sync with enroll.js and firestore.rules */
 const aud = (action, targetType, targetId, summary, o = {}) =>
   logAudit({ action, targetType, targetId, summary, role: "admin", ...o }).catch(e => console.warn("Audit not written:", e));
 const flat = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k.replace(/\./g, "_"), v]));
@@ -184,7 +185,7 @@ function exportAudit() {
 /* Enrollment review: details and ID documents side by side, then approve or decline. */
 function reviewEnroll(id) {
   const e = S.enr.find(x => x.id === id); if (!e) return;
-  const f = e.form || {}, row = (l, v) => `<dt>${l}</dt><dd>${esc(v || "-")}</dd>`, pending = e.status === "pending";
+  const f = e.form || {}, row = (l, v) => `<dt>${l}</dt><dd>${esc(v || "-")}</dd>`, pending = e.status === "pending", locked = e.status === "declined" && (e.attempt || 1) >= ENROLL_MAX + (e.bonus || 0);
   const d = document.createElement("dialog"); d.className = "wide";
   d.innerHTML = `<div class="dlg"><h3>Enrollment review</h3>
     <div class="cols2"><div><h4>Personal</h4><dl class="sum">${row("Name", f.name)}${row("Birthdate", f.birthdate)}${row("Mobile", f.phone)}${row("Address", f.address)}</dl>
@@ -192,21 +193,38 @@ function reviewEnroll(id) {
     <div><h4>Academic</h4><dl class="sum">${row("School", f.school)}${row("Strand", f.strand)}${row("LRN", f.lrn)}${row("Course", f.course)}${row("GWA", f.gwa ? f.gwa + "%" : "")}</dl>
     <h4>Documents</h4><ul class="plain files">${(e.files || []).map(x => `<li><a href="#" data-file="${esc(x.path)}" data-doc="${esc(e.id)}">${esc(x.label)}</a> <small>${esc(x.name)}</small></li>`).join("") || "<li>No files</li>"}</ul></div></div>
     ${pending ? "" : `<p class="note">${esc(cap(e.status))}${e.reviewedBy ? " by " + esc(e.reviewedBy) : ""}${e.reason ? ". Reason: " + esc(e.reason) : ""}</p>`}
-    <div class="acts"><button class="alt" data-x="close">Close</button>${pending ? `<button class="bad" data-x="declined">Decline</button><button data-x="approved">Approve</button>` : ""}</div></div>`;
+    <div class="acts"><button class="alt" data-x="close">Close</button>${pending ? `<button class="bad" data-x="declined">Decline</button><button data-x="approved">Approve</button>` : ""}${locked ? `<button data-x="bonus">Allow another attempt</button>` : ""}</div></div>`;
   document.body.append(d);
   d.addEventListener("close", () => d.remove());
   d.addEventListener("click", async ev => {
     const b = ev.target.closest("[data-x]"); if (!b) return;
     if (b.dataset.x === "close") { d.close(); return; }
+    if (b.dataset.x === "bonus") {
+      if (!await ask("Are you sure you want to allow another attempt?", [], "Yes, allow", `<p class="note">${esc(f.name)} used all ${ENROLL_MAX + (e.bonus || 0)} enrollment attempts. This gives one more.</p>`)) return;
+      d.close(); grantAttempt(e); return;
+    }
     if (b.dataset.x === "approved") {
-      if (!await ask("Approve " + f.name + "?", [], "Approve", `<p class="note">This verifies their details and unlocks the student portal.</p><dl class="sum"><dt>GWA typed by student</dt><dd>${esc(f.gwa)}%</dd></dl><label class="chk"><input type="checkbox" required> I compared this GWA with the uploaded grade report and they match.</label>`)) return;
+      if (!await ask("Are you sure you want to approve " + f.name + "?", [], "Yes, approve", `<p class="note">This verifies their details and unlocks the student portal.</p><dl class="sum"><dt>GWA typed by student</dt><dd>${esc(f.gwa)}%</dd></dl><label class="chk"><input type="checkbox" required> I compared this GWA with the uploaded grade report and they match.</label>`)) return;
       d.close(); decideEnroll(e, "approved", "");
     } else {
-      const r = await ask("Decline enrollment", [{ k: "r", label: "Reason (required, the student will see it)", area: 1, req: 1 }], "Decline");
-      if (r) { d.close(); decideEnroll(e, "declined", r.r.trim()); }
+      const r = await ask("Decline enrollment", [{ k: "r", label: "Reason (required, the student will see it)", area: 1, req: 1 }], "Continue");
+      if (!r) return;
+      const why = r.r.trim();
+      if (!await ask("Are you sure you want to decline this enrollment?", [], "Yes, decline", `<p class="note warn">${esc(f.name)} will see this reason:</p><blockquote>${esc(why)}</blockquote>`)) return;
+      d.close(); decideEnroll(e, "declined", why);
     }
   });
   d.showModal();
+}
+
+/* Gives a locked-out student one more enrollment attempt. */
+async function grantAttempt(e) {
+  const f = e.form || {}, now = serverTimestamp(), batch = writeBatch(db), msg = "The scholarship office gave you one more enrollment attempt. Please fix your enrollment and submit it again.";
+  batch.update(doc(db, "enrollments", e.id), { bonus: (e.bonus || 0) + 1 });
+  stageAudit(batch, { action: "enrollment.attempt_granted", targetType: "enrollment", targetId: e.id, summary: `${f.name}: one more enrollment attempt`, before: { allowed: ENROLL_MAX + (e.bonus || 0) }, after: { allowed: ENROLL_MAX + (e.bonus || 0) + 1 }, role: "admin" });
+  batch.set(doc(collection(db, "notifications")), { uid: e.id, text: msg, ts: now });
+  try { await batch.commit(); mailIt(e.email, msg); await load(); toast("One more attempt granted."); }
+  catch (er) { console.error(er); toast("Failed: " + (er.code || er.message)); }
 }
 
 /* One atomic write: decision + verified profile + audit entry + notification. */
@@ -238,11 +256,14 @@ function reviewChange(id) {
     if (b.dataset.x === "close") { d.close(); return; }
     if (b.dataset.x === "approved") {
       const proof = (c.files || []).length ? `<label class="chk"><input type="checkbox" required> I opened the proof and it supports this change.</label>` : `<p class="note warn">No proof was attached.</p>`;
-      if (!await ask(`Change ${c.label} to "${c.newValue}"?`, [], "Approve", proof)) return;
+      if (!await ask(`Are you sure you want to change ${c.label} to "${c.newValue}"?`, [], "Yes, approve", proof)) return;
       d.close(); decideChange(c, "approved", "");
     } else {
-      const r = await ask("Decline change request", [{ k: "r", label: "Reason (required, the student will see it)", area: 1, req: 1 }], "Decline");
-      if (r) { d.close(); decideChange(c, "declined", r.r.trim()); }
+      const r = await ask("Decline change request", [{ k: "r", label: "Reason (required, the student will see it)", area: 1, req: 1 }], "Continue");
+      if (!r) return;
+      const why = r.r.trim();
+      if (!await ask("Are you sure you want to decline this request?", [], "Yes, decline", `<p class="note warn">${esc(c.name)} will see this reason:</p><blockquote>${esc(why)}</blockquote>`)) return;
+      d.close(); decideChange(c, "declined", why);
     }
   });
   d.showModal();
@@ -331,16 +352,16 @@ document.addEventListener("click", async e => {
   if (k === "enrview") { reviewEnroll(id); return; }
   if (k === "chgview") { reviewChange(id); return; }
   if (k === "auditcsv") { exportAudit(); return; }
-  if (k === "approve" && await ask("Approve this application?", [], "Approve")) act(id, { "exam.status": "approved", "exam.reason": "" }, "Exam application approved", "Your examination application was approved. Your schedule will be posted soon.");
-  if (k === "reject") { const r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Reject"); if (r) act(id, { "exam.status": "rejected", "exam.reason": r.r.trim() }, "Exam application rejected", "Your examination application was rejected. Reason: " + r.r.trim()); }
-  if (k === "sched") { const v = A.schedule || {}, r = await ask("Exam schedule · " + A.name, [{ k: "date", label: "Date", type: "date", v: v.date, req: 1 }, { k: "time", label: "Time", type: "time", v: v.time, req: 1 }, { k: "location", label: "Location / meeting link", v: v.location, req: 1 }, { k: "notes", label: "Instructions", area: 1, v: v.notes }], "Publish"); if (r) act(id, { schedule: { ...r, published: true } }, A.schedule ? "Exam schedule changed" : "Exam schedule published", A.schedule ? "Your exam schedule was changed. Check Application Status." : "Your exam schedule is published. Check Application Status."); }
-  if ((k === "pass" || k === "fail") && await ask(`Record ${k === "pass" ? "PASS" : "FAIL"} for ${A.name}?`, [], "Record", `<p class="note">It stays hidden from the student until you publish it.</p>`)) act(id, { "result.status": k === "pass" ? "passed" : "failed" }, "Result recorded: " + (k === "pass" ? "passed" : "failed"));
-  if (k === "pubres" && await ask("Publish result for " + A.name + "?", [], "Publish")) act(id, { "result.published": true }, "Exam result published", A.result.status === "passed" ? "Your exam result is out: you passed. Document submission is now open." : "Your exam result is out. Check Application Status.");
-  if (k === "dok" && await ask("Approve this document?", [], "Approve")) docAct(id, "approved", "", "Document approved: {n}.");
-  if (k === "dfix") { const r = await ask("Request correction", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Send"); if (r) docAct(id, "correction", r.r.trim(), "Correction requested for {n}."); }
+  if (k === "approve" && await ask("Are you sure you want to approve this application?", [], "Yes, approve")) act(id, { "exam.status": "approved", "exam.reason": "" }, "Exam application approved", "Your examination application was approved. Your schedule will be posted soon.");
+  if (k === "reject") { const r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Continue"); if (r && await ask("Are you sure you want to reject this application?", [], "Yes, reject", `<p class="note warn">The student will see: ${esc(r.r.trim())}</p>`)) act(id, { "exam.status": "rejected", "exam.reason": r.r.trim() }, "Exam application rejected", "Your examination application was rejected. Reason: " + r.r.trim()); }
+  if (k === "sched") { const v = A.schedule || {}, r = await ask("Exam schedule · " + A.name, [{ k: "date", label: "Date", type: "date", v: v.date, req: 1 }, { k: "time", label: "Time", type: "time", v: v.time, req: 1 }, { k: "location", label: "Location / meeting link", v: v.location, req: 1 }, { k: "notes", label: "Instructions", area: 1, v: v.notes }], "Review"); if (r && await ask(A.schedule ? "Are you sure you want to change the exam schedule?" : "Are you sure you want to publish the exam schedule?", [], "Yes, publish", `<p class="note">${esc(A.name)} will be notified.</p><dl class="sum"><dt>Date</dt><dd>${esc(r.date)}</dd><dt>Time</dt><dd>${esc(r.time)}</dd><dt>Location</dt><dd>${esc(r.location)}</dd></dl>`)) act(id, { schedule: { ...r, published: true } }, A.schedule ? "Exam schedule changed" : "Exam schedule published", A.schedule ? "Your exam schedule was changed. Check Application Status." : "Your exam schedule is published. Check Application Status."); }
+  if ((k === "pass" || k === "fail") && await ask(`Are you sure you want to record ${k === "pass" ? "PASS" : "FAIL"} for ${A.name}?`, [], "Yes, record", `<p class="note">It stays hidden from the student until you publish it.</p>`)) act(id, { "result.status": k === "pass" ? "passed" : "failed" }, "Result recorded: " + (k === "pass" ? "passed" : "failed"));
+  if (k === "pubres" && await ask("Are you sure you want to publish the result for " + A.name + "?", [], "Yes, publish", `<p class="note warn">The student is notified and can see it right away.</p>`)) act(id, { "result.published": true }, "Exam result published", A.result.status === "passed" ? "Your exam result is out: you passed. Document submission is now open." : "Your exam result is out. Check Application Status.");
+  if (k === "dok" && await ask("Are you sure you want to approve this document?", [], "Yes, approve")) docAct(id, "approved", "", "Document approved: {n}.");
+  if (k === "dfix") { const r = await ask("Request correction", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Continue"); if (r && await ask("Are you sure you want to request a correction?", [], "Yes, send", `<p class="note warn">The student will see: ${esc(r.r.trim())}</p>`)) docAct(id, "correction", r.r.trim(), "Correction requested for {n}."); }
   if (k === "hist") ask("History · " + A.name, [], "", `<ul class="plain">${[...A.history].reverse().map(h => `<li>${esc(h.text)}<br><small>${new Date(h.t).toLocaleString()} · ${esc(h.by)}</small></li>`).join("")}</ul>`);
   if (k === "sample") {
-    if (!await ask("Add sample scholarships?", [], "Add", `<p class="note">Adds 7 example scholarships so the Browse page has content. They are labelled as samples and you can close or edit them any time.</p>`)) return;
+    if (!await ask("Are you sure you want to add sample scholarships?", [], "Yes, add", `<p class="note">Adds 7 example scholarships so the Browse page has content. They are labelled as samples and you can close or edit them any time.</p>`)) return;
     const S7 = [["Academic Excellence Scholarship", "Rewards consistently high grades across all subjects."], ["Community Leaders Grant", "For students active in school or barangay organizations."], ["STEM Future Scholarship", "Supports students aiming for science, technology, engineering or math."], ["Arts and Culture Grant", "For students in the arts, music, writing or design."], ["First-Generation Student Aid", "For students who are the first in their family to attend college."], ["Public Service Scholarship", "For students who plan to work in government or non-profit service."], ["Athlete Scholar Grant", "For student-athletes who balance sports and academics."]];
     try {
       const batch = writeBatch(db);
@@ -370,7 +391,7 @@ document.addEventListener("click", async e => {
       const ch = s.id ? diff(s, data) : [];
       if (s.id && !ch.length) { toast("No changes to save."); return; }
       const detail = s.id ? `<ul class="plain">${ch.map(c => `<li><b>${esc(c[0])}</b>: ${esc(c[1] || "none")} → ${esc(c[2] || "none")}</li>`).join("")}</ul>` : `<p class="note">${esc(data.name)}: ${esc(reqText(data))}. It opens to students immediately.</p>`;
-      if (!await ask(s.id ? "Save these changes?" : "Publish this scholarship?", [], "Confirm", detail)) return;
+      if (!await ask(s.id ? "Are you sure you want to save these changes?" : "Are you sure you want to publish this scholarship?", [], "Yes, confirm", detail)) return;
       try {
         let sid = id;
         if (s.id) await updateDoc(doc(db, "scholarships", id), data); else sid = (await addDoc(collection(db, "scholarships"), { ...data, status: "open", createdAt: serverTimestamp() })).id;
@@ -381,7 +402,7 @@ document.addEventListener("click", async e => {
   }
   if (k === "togsch") {
     const s = S.schos.find(x => x.id === id), to = s.status === "open" ? "closed" : "open";
-    if (!await ask(`${to === "closed" ? "Close" : "Reopen"} "${s.name}"?`, [], "Confirm", `<p class="note">${to === "closed" ? "Students will no longer be able to apply." : "Students will be able to apply again."}</p>`)) return;
+    if (!await ask(`Are you sure you want to ${to === "closed" ? "close" : "reopen"} "${s.name}"?`, [], "Yes, confirm", `<p class="note">${to === "closed" ? "Students will no longer be able to apply." : "Students will be able to apply again."}</p>`)) return;
     try { await updateDoc(doc(db, "scholarships", id), { status: to }); aud("scholarship." + (to === "closed" ? "closed" : "reopened"), "scholarship", id, s.name, { before: { status: s.status }, after: { status: to } }); await load(); toast("Updated."); } catch (er) { toast("Failed: " + (er.code || er.message)); }
   }
   if (k === "sok") {
@@ -389,14 +410,23 @@ document.addEventListener("click", async e => {
     const full = s?.slots && S.sapps.filter(y => y.schoId === x.schoId && y.status === "approved").length >= s.slots;
     const miss = s ? meets(s, x.form) : [];
     const warn = `<p class="note good">Coverage: ${esc(coverText(x.form.coverage ?? (s ? coverage(s, x.form.gwa) : 0)))}</p>` + (full ? `<p class="note">All ${s.slots} slots are already filled.</p>` : "") + (miss.length ? `<p class="note">Does not meet: ${esc(miss.join("; "))}.</p>` : "");
-    if (await ask("Approve " + x.name + " for " + x.schoName + "?", [], "Approve", warn)) sAct(x, "approved", "");
+    if (await ask("Are you sure you want to approve " + x.name + " for " + x.schoName + "?", [], "Yes, approve", warn)) sAct(x, "approved", "");
   }
-  if (k === "sno") { const x = S.sapps.find(y => y.id === id), r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Reject"); if (r) sAct(x, "rejected", r.r.trim()); }
+  if (k === "sno") { const x = S.sapps.find(y => y.id === id), r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Continue"); if (r && await ask("Are you sure you want to reject this scholarship application?", [], "Yes, reject", `<p class="note warn">The student will see: ${esc(r.r.trim())}</p>`)) sAct(x, "rejected", r.r.trim()); }
   if (k === "newann" || k === "editann") {
-    const n = S.ann.find(x => x.id === id) || {}, r = await ask(n.id ? "Edit announcement" : "New announcement", [{ k: "title", label: "Title", v: n.title, req: 1 }, { k: "body", label: "Message", v: n.body, area: 1, req: 1 }], "Publish");
-    if (r) try { n.id ? await updateDoc(doc(db, "announcements", id), { title: r.title, body: r.body }) : await addDoc(collection(db, "announcements"), { ...r, status: "published", ts: serverTimestamp() }); aud(n.id ? "announcement.updated" : "announcement.created", "announcement", id || "new", r.title); await load(); toast("Announcement saved."); } catch (er) { toast("Failed: " + er.code); }
+    const n = S.ann.find(x => x.id === id) || {}, r = await ask(n.id ? "Edit announcement" : "New announcement", [{ k: "title", label: "Title", v: n.title, req: 1 }, { k: "body", label: "Message", v: n.body, area: 1, req: 1 }], "Review");
+    if (!r) return;
+    const title = r.title.trim(), body = r.body.trim();
+    if (n.id && title === n.title && body === n.body) { toast("No changes to save."); return; }
+    const preview = `<dl class="sum"><dt>Title</dt><dd>${esc(title)}</dd><dt>Message</dt><dd>${esc(body)}</dd></dl>`;
+    if (!await ask(n.id ? "Are you sure you want to save changes to this announcement?" : "Are you sure you want to publish this announcement?", [], n.id ? "Yes, save" : "Yes, publish",
+      `<p class="note">${n.id ? "Students will see the updated text." : "Every student will see it right away, and as a pop-up the next time they open the dashboard."}</p>${preview}`)) return;
+    try { n.id ? await updateDoc(doc(db, "announcements", id), { title, body }) : await addDoc(collection(db, "announcements"), { title, body, status: "published", ts: serverTimestamp() }); aud(n.id ? "announcement.updated" : "announcement.created", "announcement", id || "new", title, n.id ? { before: { title: n.title, body: n.body }, after: { title, body } } : { after: { title, body } }); await load(); toast("Announcement saved."); } catch (er) { toast("Failed: " + er.code); }
   }
-  if (k === "togann") { const n = S.ann.find(x => x.id === id); try { await updateDoc(doc(db, "announcements", id), { status: n.status === "published" ? "archived" : "published" }); aud("announcement." + (n.status === "published" ? "archived" : "published"), "announcement", id, n.title); await load(); toast("Updated."); } catch (er) { toast("Failed: " + er.code); } }
+  if (k === "togann") {
+    const n = S.ann.find(x => x.id === id), hide = n.status === "published";
+    if (!await ask(hide ? "Are you sure you want to archive this announcement?" : "Are you sure you want to publish this announcement again?", [], hide ? "Yes, archive" : "Yes, publish", `<p class="note">${hide ? "Students will no longer see it." : "Students will see it again."}</p><dl class="sum"><dt>Title</dt><dd>${esc(n.title)}</dd></dl>`)) return;
+    try { await updateDoc(doc(db, "announcements", id), { status: n.status === "published" ? "archived" : "published" }); aud("announcement." + (n.status === "published" ? "archived" : "published"), "announcement", id, n.title); await load(); toast("Updated."); } catch (er) { toast("Failed: " + er.code); } }
 });
 
 document.addEventListener("submit", async e => {
@@ -406,6 +436,6 @@ document.addEventListener("submit", async e => {
   for (const k of ["benefits", "courses", "quals", "docs"]) if (f[k].trim()) out[k] = f[k].split("\n").map(s => s.trim()).filter(Boolean);
   if (f.instructions.trim()) out.instructions = f.instructions.trim();
   if (f.deadlines.trim()) out.deadlines = f.deadlines.trim();
-  if (!await ask("Publish these changes?", [], "Publish", `<p class="note">This changes what every student sees on the Scholarship page.</p>`)) return;
+  if (!await ask("Are you sure you want to publish these changes?", [], "Yes, publish", `<p class="note">This changes what every student sees on the Scholarship page.</p>`)) return;
   try { const before = S.set || {}; await setDoc(doc(db, "settings", "scholarship"), out); aud("settings.updated", "settings", "scholarship", "Program information updated", { before, after: out }); await load(); toast("Scholarship information saved."); } catch (er) { toast("Failed: " + er.code); }
 });

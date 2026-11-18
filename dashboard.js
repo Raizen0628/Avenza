@@ -5,7 +5,7 @@ import { logAudit } from "./audit.js";
 import { icon } from "./icons.js";
 import { esc, tag, when, toast, ask, entry, cap, reqText, isOpen, meets, coverage, coverText, tierText, tiersOf, TIER_NAME } from "./core.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, addDoc, getDocs, collection, query, where, serverTimestamp }
+import { doc, getDoc, setDoc, updateDoc, addDoc, getDocs, collection, query, where, serverTimestamp, arrayUnion }
   from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
 /* Content supplied by the project owner. Admins can override it in Scholarship Management (settings/scholarship). */
@@ -29,7 +29,8 @@ $("nav").innerHTML = navHtml();
 onAuthStateChanged(auth, async u => {
   if (!u) return;
   S.u = u;
-  try { await load(); render(); mountChat(() => ({ docs: S.set?.docs || [] })); popups().catch(console.warn); } catch (e) { console.error(e); $("view").innerHTML = `<div class="card"><p class="note">Could not load your data (${esc(e.code || e.message)}). Check that Firestore is enabled and the rules are published.</p></div>`; }
+  mountChat(() => ({ docs: S.set?.docs || [] }));
+  try { await load(); render(); popups().catch(console.warn); } catch (e) { console.error(e); $("view").innerHTML = `<div class="card"><p class="note">Could not load your data (${esc(e.code || e.message)}). Check that Firestore is enabled and the rules are published.</p></div>`; }
 });
 
 async function load() {
@@ -62,6 +63,12 @@ async function load() {
 const aud = o => logAudit(o).catch(e => console.warn("Audit not written:", e));
 const notify = (text) => addDoc(collection(db, "notifications"), { uid: S.u.uid, text, ts: serverTimestamp() });
 const profDone = () => !!(S.prof.name && S.prof.phone && S.prof.school && S.prof.course);
+/* Maximum exam attempts per student (1 + retakes). Keep in sync with firestore.rules. */
+const MAX_EXAM = 2;
+const examTry = () => a()?.examAttempt || 1;
+/* Exam applications the admin rejected can be fixed and sent again, up to MAX_APP times in total. Keep in sync with firestore.rules. */
+const MAX_APP = 3;
+const appTry = () => a()?.appTry || 1;
 const a = () => S.app;
 const resultOut = () => a()?.result?.published ? a().result.status : null;
 
@@ -187,8 +194,13 @@ const pages = {
       ${(() => { const open = S.schos.filter(isOpen); return open.length ? `<label>Scholarship you are applying for<select name="schoId" required><option value="">Choose a scholarship</option>${open.map(s => `<option value="${esc(s.id)}">${esc(s.name)}${S.prof.gwaVerified ? " · you would get " + esc(coverText(coverage(s, S.prof.gwa))) : ""}</option>`).join("")}</select></label>` : `<p class="note">No scholarships are open right now. You can still apply for the exam.</p>`; })()}
       <label class="chk"><input type="checkbox" name="cit" required> I am a Filipino citizen and the information above is true.</label>
       <button class="btn" type="submit">Submit application</button></form></section>`;
-    h += `<p class="note">Application ID ${esc(A.appId)}${f.schoName ? " · Scholarship: " + esc(f.schoName) : ""}</p>`;
-    if (X.status === "rejected") h += `<p class="note">Your application was rejected. Reason: ${esc(X.reason)}</p>`;
+    h += `<p class="note">Exam attempt ${examTry()} of ${MAX_EXAM} · Application ID ${esc(A.appId)}${f.schoName ? " · Scholarship: " + esc(f.schoName) : ""}</p>`;
+    if (X.status === "rejected") {
+      const n = appTry(), left = MAX_APP - n;
+      h += `<section class="card"><div class="head"><h2>Application rejected</h2></div><p class="note">Reason: ${esc(X.reason)}</p>`
+        + (left > 0 ? `<p class="note warn">Application attempt ${n} of ${MAX_APP}. You have ${left} attempt${left === 1 ? "" : "s"} left. If the reason is about your details, check your Profile first.</p><button class="btn" data-reapply="1">Fix and resubmit</button>`
+                    : `<p class="note">You used all ${MAX_APP} application attempts. Please contact the scholarship office.</p>`) + `</section>`;
+    }
     if (X.status === "approved" && A.schedule?.published) { const c = A.schedule; h += `<section class="card"><div class="head"><h2>Your exam schedule</h2></div><div class="row"><div><b>${esc(c.date)} · ${esc(c.time)}</b><small>${esc(c.location)}</small></div></div><p style="font-size:.85rem">${esc(c.notes)}</p></section>`; }
     if (resultOut() === "passed") {
       h += `<section class="card"><div class="head"><h2>Documents</h2></div><p class="note">Accepted: PDF, JPG or PNG, up to 5 MB each.</p>${docsList().map((n, i) => {
@@ -196,7 +208,13 @@ const pages = {
         return `<div class="row"><div><b>${esc(n)}</b><small>${st === "rejected" || st === "correction" ? "Reason: " + esc(d.reason) : d ? "Uploaded" : "Not uploaded"}</small></div>${tag(d ? (st === "correction" ? "Correction" : st[0].toUpperCase() + st.slice(1)) : "Not started")}${redo ? `<input type="file" data-k="${i}" accept=".pdf,.jpg,.jpeg,.png">` : ""}</div>`;
       }).join("")}</section>`;
     }
-    if (resultOut() === "failed") h += `<section class="card"><p class="note">You did not pass the examination, so document submission is not available.</p></section>`;
+    if (resultOut() === "failed") {
+      const n = examTry(), left = MAX_EXAM - n;
+      h += `<section class="card"><div class="head"><h2>Exam result</h2></div><p class="note">You did not pass the examination, so document submission is not available.</p>`
+        + (left > 0 ? `<p class="note warn">This was attempt ${n} of ${MAX_EXAM}. You have ${left} attempt${left === 1 ? "" : "s"} left.</p><button class="btn" data-retake="1">Apply to retake the exam</button>`
+                    : `<p class="note">You used all ${MAX_EXAM} exam attempts. Please contact the scholarship office if you think this is a mistake.</p>`) + `</section>`;
+    }
+    if ((A.pastAttempts || []).length) h += `<p class="note">Previous attempts: ${A.pastAttempts.map(p => "#" + p.n + " " + esc(p.result) + (p.date ? " (" + esc(p.date) + ")" : "")).join(", ")}</p>`;
     return h;
   },
   profile() {
@@ -248,7 +266,7 @@ document.addEventListener("click", async e => {
     const summary = `<dl class="sum"><dt>Scholarship</dt><dd>${esc(s.name)}</dd><dt>Verified GWA</dt><dd>${esc(f.gwa)}%</dd><dt>You would receive</dt><dd>${esc(coverText(f.coverage))}</dd><dt>Household income</dt><dd>₱${f.income.toLocaleString()}</dd><dt>Course</dt><dd>${esc(f.course)}</dd></dl>`
       + (miss.length ? `<p class="note warn">You do not meet: ${esc(miss.join("; "))}. You can still submit, and an admin makes the final decision.</p>` : `<p class="note good">You meet the listed requirements.</p>`)
       + `<label class="chk"><input type="checkbox" required> I confirm these details are true and I understand that false information can disqualify me.</label>`;
-    if (!await ask("Review before you submit", [], "Submit application", summary)) return;
+    if (!await ask("Are you sure you want to submit this application?", [], "Yes, submit", summary)) return;
     try {
       await setDoc(doc(db, "scholarshipApps", `${S.u.uid}_${s.id}`), {
         uid: S.u.uid, schoId: s.id, schoName: s.name, name: S.prof.name, email: S.prof.email, form: f,
@@ -293,6 +311,7 @@ document.addEventListener("submit", async e => {
     if (e.target.id === "ef") {
       const P = S.prof, sch = S.schos.find(x => x.id === f.schoId);
       if (S.schos.some(isOpen) && !sch) throw { message: "Choose the scholarship you are applying for." };
+      if (!await ask("Are you sure you want to submit your exam application?", [], "Yes, submit", `<dl class="sum"><dt>Name</dt><dd>${esc(P.name)}</dd><dt>Scholarship</dt><dd>${esc(sch?.name || "None chosen")}</dd></dl><p class="note">You can only apply for the exam once, then wait for the admin.</p>`)) { btn.disabled = false; return; }
       const gwa = S.prof.gwaVerified ? +S.prof.gwa : +f.gwa, income = S.prof.gwaVerified ? +S.prof.income : +f.income;
       if (!(gwa >= 0 && gwa <= 100) || !(income >= 0)) throw { message: "Check your GWA and income values." };
       const appId = "AVZ-" + new Date().getFullYear() + "-" + S.u.uid.slice(0, 6).toUpperCase();
@@ -366,5 +385,55 @@ document.addEventListener("change", async e => {
     aud({ action: "profile.photo_changed", targetType: "user", targetId: S.u.uid, summary: "Changed profile photo" });
     document.querySelector(".top .avatar")?.removeAttribute("data-p");
     await reload(); toast("Photo updated.");
+  } catch (err) { console.error(err); toast("Failed: " + (err.code || err.message)); }
+});
+
+
+/* ---------- Exam retake: one more application after a failed result (limit: MAX_EXAM) ---------- */
+document.addEventListener("click", async e => {
+  if (!e.target.closest("[data-retake]")) return;
+  const A = a(), n = examTry();
+  if (!A || resultOut() !== "failed" || n >= MAX_EXAM) return;
+  const sure = await ask("Retake the exam?", [], "Yes, apply again", `<p class="note warn">This is attempt ${n + 1} of ${MAX_EXAM}${n + 1 >= MAX_EXAM ? ", your last one" : ""}. An admin has to approve it again and give you a new schedule.</p>`);
+  if (!sure) return;
+  try {
+    await updateDoc(doc(db, "applications", S.u.uid), {
+      examAttempt: n + 1,
+      pastAttempts: arrayUnion({ n, result: "failed", date: A.schedule?.date || "", at: Date.now() }),
+      exam: { status: "pending", reason: "", form: A.exam.form },
+      schedule: null,
+      result: { status: "awaiting", published: false },
+      history: arrayUnion(entry("student", `Applied to retake the exam (attempt ${n + 1} of ${MAX_EXAM})`))
+    });
+    aud({ action: "exam_app.retake", targetType: "application", targetId: S.u.uid, summary: `Applied to retake the exam (attempt ${n + 1} of ${MAX_EXAM})`, before: { attempt: n }, after: { attempt: n + 1 } });
+    await notify(`Your retake application (attempt ${n + 1} of ${MAX_EXAM}) was sent and is pending review.`);
+    await reload(); toast("Retake application sent.");
+  } catch (err) { console.error(err); toast("Failed: " + (err.code || err.message)); }
+});
+
+
+/* ---------- Rejected exam application: fix and resubmit (limit: MAX_APP) ---------- */
+document.addEventListener("click", async e => {
+  if (!e.target.closest("[data-reapply]")) return;
+  const A = a(), n = appTry(), P = S.prof;
+  if (!A || A.exam?.status !== "rejected" || n >= MAX_APP) return;
+  if (!P.gwaVerified) { toast("Your GWA has not been verified yet."); return; }
+  const open = S.schos.filter(isOpen);
+  const r = await ask("Are you sure you want to resubmit your exam application?", [], "Yes, resubmit",
+    `<p class="note">This is attempt ${n + 1} of ${MAX_APP}. The admin will review it again using your current profile details.</p>`
+    + (open.length ? `<label>Scholarship you are applying for<select name="schoId" required><option value="">Choose a scholarship</option>${open.map(s => `<option value="${esc(s.id)}" ${s.id === A.exam.form?.schoId ? "selected" : ""}>${esc(s.name)} · you would get ${esc(coverText(coverage(s, P.gwa)))}</option>`).join("")}</select></label>` : "")
+    + `<label class="chk"><input type="checkbox" required> I am a Filipino citizen and the information in my profile is true.</label>`);
+  if (!r) return;
+  const sch = S.schos.find(x => x.id === r.schoId);
+  if (open.length && !sch) { toast("Choose a scholarship."); return; }
+  try {
+    await updateDoc(doc(db, "applications", S.u.uid), {
+      appTry: n + 1, name: P.name,
+      exam: { status: "pending", reason: "", form: { school: P.school, strand: P.strand, gwa: +P.gwa, income: +P.income, course: P.course, schoId: sch?.id || "", schoName: sch?.name || "" } },
+      history: arrayUnion(entry("student", `Resubmitted exam application (attempt ${n + 1} of ${MAX_APP})`))
+    });
+    aud({ action: "exam_app.resubmitted", targetType: "application", targetId: S.u.uid, summary: `Resubmitted exam application (attempt ${n + 1} of ${MAX_APP})`, before: { attempt: n }, after: { attempt: n + 1, scholarship: sch?.name || "" } });
+    await notify(`Your exam application was sent again (attempt ${n + 1} of ${MAX_APP}) and is pending review.`);
+    await reload(); toast("Application resubmitted.");
   } catch (err) { console.error(err); toast("Failed: " + (err.code || err.message)); }
 });

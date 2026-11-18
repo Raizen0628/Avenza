@@ -3,9 +3,12 @@ import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, multiFactor, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
 import { doc, getDoc, setDoc, writeBatch, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
-import { esc } from "./core.js";
+import { esc, ask } from "./core.js";
 import { checkFile, uploadPrivate, extOf } from "./files.js";
 import { stageAudit } from "./audit.js";
+
+/* Maximum enrollment submissions per student (an admin can grant extra attempts). Keep in sync with firestore.rules. */
+const MAX_ENROLL = 3;
 
 const $ = id => document.getElementById(id);
 const stage = $("stage");
@@ -74,15 +77,15 @@ onAuthStateChanged(auth, async user => {
 
 /* ---------- Views ---------- */
 function status(kind) {
-  const e = S.enr;
+  const e = S.enr, used = e.attempt || 1, limit = MAX_ENROLL + (e.bonus || 0), left = limit - used;
   stage.innerHTML = kind === "pending"
     ? `<div class="en-card state"><span class="state-badge wait">Under review</span><h1>Your enrollment is being reviewed</h1>
        <p class="lead">An admin is checking your details and ID. You will get a notification and an email once there is a decision. You can close this page.</p>
-       <dl class="sum"><dt>Submitted by</dt><dd>${esc(e.form?.name)}</dd><dt>School</dt><dd>${esc(e.form?.school)}</dd><dt>Attempt</dt><dd>${esc(e.attempt || 1)}</dd></dl></div>`
-    : `<div class="en-card state"><span class="state-badge bad">Needs changes</span><h1>Your enrollment was declined</h1>
+       <dl class="sum"><dt>Submitted by</dt><dd>${esc(e.form?.name)}</dd><dt>School</dt><dd>${esc(e.form?.school)}</dd><dt>Attempt</dt><dd>${used} of ${limit}</dd></dl></div>`
+    : `<div class="en-card state"><span class="state-badge bad">${left > 0 ? "Needs changes" : "No attempts left"}</span><h1>Your enrollment was declined</h1>
        <p class="lead">The admin left this reason:</p><blockquote>${esc(e.reason || "No reason was given.")}</blockquote>
-       <p class="lead">Fix the problem and send it again. Your previous answers and files are kept.</p>
-       <div class="en-acts"><button class="btn" id="redo">Edit and resubmit</button></div></div>`;
+       <p class="lead">Attempt ${used} of ${limit}. ${left > 0 ? `You have ${left} attempt${left === 1 ? "" : "s"} left. Fix the problem and send it again. Your previous answers and files are kept.` : "You have used all your attempts. Please contact the scholarship office to ask for another chance."}</p>
+       ${left > 0 ? `<div class="en-acts"><button class="btn" id="redo">Edit and resubmit</button></div>` : ""}</div>`;
   $("redo")?.addEventListener("click", () => { S.step = 0; form(); });
 }
 
@@ -154,6 +157,7 @@ async function onSubmit(e) {
   e.preventDefault();
   if (S.busy) return;
   if (S.step < STEPS.length - 1) { if (validateStep()) { S.step++; form(); scrollTo(0, 0); } return; }
+  if (!await ask("Are you sure you want to submit your enrollment?", [], "Yes, submit", `<p class="note">An admin will review your details and documents. You cannot edit them while they are being reviewed.</p>`)) return;
   S.busy = true; const btn = $("next"); btn.disabled = true; btn.textContent = "Uploading…"; $("formErr").textContent = "";
   try {
     const uid = S.user.uid, files = [];
@@ -166,10 +170,10 @@ async function onSubmit(e) {
     payload.phone = payload.phone.replace(/\s|-/g, ""); payload.guardianPhone = payload.guardianPhone.replace(/\s|-/g, "");
     payload.gwa = +payload.gwa; payload.income = +payload.income;
     const batch = writeBatch(db);
-    batch.set(doc(db, "enrollments", uid), { uid, email: S.user.email, form: payload, files, status: "pending", reason: "", attempt: S.attempt, submittedAt: serverTimestamp() });
+    batch.set(doc(db, "enrollments", uid), { uid, email: S.user.email, form: payload, files, status: "pending", reason: "", attempt: S.attempt, bonus: S.enr?.bonus || 0, submittedAt: serverTimestamp() });
     stageAudit(batch, { action: "enrollment.submitted", targetType: "enrollment", targetId: uid, summary: `Submitted enrollment (attempt ${S.attempt})`, role: "student" });
     await batch.commit();
-    S.enr = { form: payload, files, status: "pending", attempt: S.attempt };
+    S.enr = { form: payload, files, status: "pending", attempt: S.attempt, bonus: S.enr?.bonus || 0 };
     status("pending"); scrollTo(0, 0);
   } catch (err) {
     console.error(err);
