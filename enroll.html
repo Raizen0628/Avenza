@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Avenza – Enrollment</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Montserrat:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="theme.css?v=4">
+  <style>body { visibility: hidden; }</style>
+</head>
+<body class="en-body">
+  <header class="en-top">
+    <img class="logo" src="logo.png" alt="Avenza">
+    <a href="index.html" id="logout" class="en-out"></a>
+  </header>
+
+  <main class="en-wrap">
+    <div id="stage"><p class="spin">Loading…</p></div>
+  </main>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <!-- Deliberately no guard.js here: guard.js sends unapproved students to this page. -->
+  <script type="module" src="chrome.js"></script>
+  <script type="module" src="enroll.js"></script>
+</body>
+</html>

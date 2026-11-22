@@ -1,7 +1,10 @@
 import { auth, db } from "./firebase-config.js";
-import { esc, tag, when, toast, ask, history, cap, meets, reqText } from "./core.js";
+import { esc, tag, when, toast, ask, entry, cap, meets, reqText, tiersOf, coverage, coverText } from "./core.js";
+import { stageAudit, logAudit } from "./audit.js";
+import { signedUrl } from "./files.js";
+import { icon } from "./icons.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, addDoc, getDocs, collection, arrayUnion, serverTimestamp }
+import { doc, getDoc, setDoc, updateDoc, addDoc, getDocs, collection, arrayUnion, serverTimestamp, query, orderBy, limit, writeBatch }
   from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
 const MAIL_FN = "https://oqpgvxaswfpcjonglrdy.supabase.co/functions/v1/notify-email";
@@ -19,10 +22,10 @@ async function mailIt(to, text) {
 
 const $ = id => document.getElementById(id);
 const S = {};
-const TITLES = { apps: "Examination Applications", sched: "Exam Scheduling", res: "Exam Results", docs: "Document Verification", schos: "Scholarships", sapps: "Scholarship Applications", sch: "Program Information", ann: "Announcements", people: "Applicant Management" };
-let page = "apps";
-const ICON = { apps: "", sched: "", res: "", docs: "", schos: "", sapps: "", sch: "", ann: "", people: "" };
-const pend = k => k === "apps" && S.apps ? S.apps.filter(a => a.exam.status === "pending").length : k === "sapps" && S.sapps ? S.sapps.filter(a => a.status === "pending").length : 0;
+const TITLES = { enroll: "Enrollment Review", changes: "Profile Changes", apps: "Examination Applications", sched: "Exam Scheduling", res: "Exam Results", docs: "Document Verification", schos: "Scholarships", sapps: "Scholarship Applications", sch: "Program Information", ann: "Announcements", people: "Applicant Management", audit: "Audit Log" };
+let page = "enroll";
+const ICON = Object.fromEntries(Object.keys(TITLES).map(k => [k, icon(k)]));
+const pend = k => k === "changes" && S.chg ? S.chg.filter(c => c.status === "pending").length : k === "enroll" && S.enr ? S.enr.filter(e => e.status === "pending").length : k === "apps" && S.apps ? S.apps.filter(a => a.exam.status === "pending").length : k === "sapps" && S.sapps ? S.sapps.filter(a => a.status === "pending").length : 0;
 const navHtml = () => Object.entries(TITLES).map(([k, v]) => `<button data-p="${k}"><span class="ic">${ICON[k]}</span>${v}${pend(k) ? `<em class="pill">${pend(k)}</em>` : ""}</button>`).join("");
 $("nav").innerHTML = navHtml();
 
@@ -33,6 +36,8 @@ async function load() {
     const rows = async c => (await getDocs(collection(db, c))).docs.map(d => ({ id: d.id, ...d.data() }));
     S.apps = await rows("applications"); S.docs = await rows("documents"); S.ann = await rows("announcements");
     S.schos = await rows("scholarships"); S.sapps = await rows("scholarshipApps");
+    S.chg = await rows("changeRequests"); S.chg.sort((x, y) => (y.createdAt?.seconds || 0) - (x.createdAt?.seconds || 0));
+    S.enr = await rows("enrollments"); S.enr.sort((x, y) => (y.submittedAt?.seconds || 0) - (x.submittedAt?.seconds || 0));
     S.sapps.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     S.ann.sort((a, b) => (b.ts?.seconds || 0) - (a.ts?.seconds || 0));
     const st = await getDoc(doc(db, "settings", "scholarship")); S.set = st.exists() ? st.data() : {};
@@ -52,20 +57,57 @@ function table(cols, rows, statuses) {
 }
 const btn = (act, id, label, cls = "") => `<button class="sm ${cls}" data-a="${act}" data-id="${id}">${label}</button>`;
 const card = (h, body) => `<section class="card"><div class="head"><h2>${h}</h2></div>${body}</section>`;
-const nm = a => `<b>${esc(a.name)}</b><br><small>${esc(a.appId)}</small>`;
 const sponsorText = provider => provider?.trim().toLowerCase() === "sample sponsor" ? "SM Foundation, Inc." : provider;
+const nm = a => `<b>${esc(a.name)}</b><br><small>${esc(a.appId)}${(a.examAttempt || 1) > 1 ? " · exam attempt " + a.examAttempt : ""}</small>`;
+
+let docUser = null; /* applicant whose documents are open in Document Verification */
+
+function docDetail(id) {
+  const a = S.apps.find(x => x.id === id) || { name: id, appId: "" }, ds = dstat(id);
+  const ok = ds.filter(d => d.status === "approved").length;
+  return `<p>${btn("dback", "", "← Back to applicants", "alt")}</p>` +
+    card(`${esc(a.name)} <small>${esc(a.appId)}</small>`, `<p class="note">${ok} of ${ds.length} documents approved.</p>` +
+      table(["Document", "Status", "Actions"], ds.map(d => [
+        `<a href="#" data-file="${esc(d.path || "")}" data-url="${esc(d.url || "")}" data-doc="${esc(d.id)}">${esc(d.name)}</a><br><small>${esc(d.fileName)}</small>`,
+        tag(d.status === "correction" ? "Correction" : d.status[0].toUpperCase() + d.status.slice(1)) + (d.reason ? `<br><small>${esc(d.reason)}</small>` : ""),
+        d.status === "submitted" ? btn("dok", d.id, "Approve") + btn("dfix", d.id, "Request correction", "bad") : ""
+      ])));
+}
 
 const pages = {
+  enroll() {
+    const c = t => S.enr.filter(e => e.status === t).length, n = (l, v, col) => `<div class="stat" style="--c:${col}"><small>${l}</small><b>${v}</b></div>`;
+    return `<section class="stats">${n("Submissions", S.enr.length, "var(--brand2)")}${n("Pending", c("pending"), "var(--wait)")}${n("Approved", c("approved"), "var(--ok)")}${n("Declined", c("declined"), "var(--bad)")}</section>`
+      + card("Student enrollment", table(["Student", "School · Course", "Submitted", "Status", "Action"],
+        S.enr.map(e => { const f = e.form || {};
+          return [`<b>${esc(f.name)}</b><br><small>${esc(e.email)}</small>`, `${esc(f.school)}<br><small>${esc(f.course)}</small>`, when(e.submittedAt) + `<br><small>Attempt ${e.attempt || 1}</small>`,
+            tag(cap(e.status)) + (e.reason ? `<br><small>${esc(e.reason)}</small>` : ""),
+            btn("enrview", e.id, e.status === "pending" ? "Review" : "View", e.status === "pending" ? "" : "alt")]; }), ["Pending", "Approved", "Declined"]));
+  },
+  changes() {
+    const c = t => S.chg.filter(x => x.status === t).length, n = (l, v, col) => `<div class="stat" style="--c:${col}"><small>${l}</small><b>${v}</b></div>`;
+    return `<section class="stats">${n("Requests", S.chg.length, "var(--brand2)")}${n("Pending", c("pending"), "var(--wait)")}${n("Approved", c("approved"), "var(--ok)")}${n("Declined", c("declined"), "var(--bad)")}</section>`
+      + card("Profile change requests", table(["Student", "Detail", "Change", "Status", "Action"], S.chg.map(x => [`<b>${esc(x.name)}</b><br><small>${esc(x.email)}</small>`, esc(x.label), `${esc(x.oldValue)} → <b>${esc(x.newValue)}</b>`,
+        tag(cap(x.status)) + (x.decision ? `<br><small>${esc(x.decision)}</small>` : ""), btn("chgview", x.id, x.status === "pending" ? "Review" : "View", x.status === "pending" ? "" : "alt")]), ["Pending", "Approved", "Declined"]));
+  },
+  audit() {
+    const L = S.audit || [], acts = [...new Set(L.map(x => x.action))].sort();
+    return `<p><button class="btn alt" data-a="auditcsv">Export CSV</button></p>` + card("Audit log", `<p class="note">Entries cannot be edited or deleted, not even by admins. Showing the latest ${L.length}.</p>`
+      + table(["Time", "Actor", "Action", "Target", "Details"], L.map(x => [
+        `<small>${x.ts?.seconds ? new Date(x.ts.seconds * 1000).toLocaleString() : ""}</small>`,
+        `${esc(x.actorEmail)}<br><small>${esc(x.actorRole)}</small>`, `<code>${esc(x.action)}</code>`,
+        `${esc(x.targetType)}<br><small>${esc(x.targetId)}</small>`, esc(x.summary) + (x.reason ? `<br><small>Reason: ${esc(x.reason)}</small>` : "")]), acts));
+  },
   schos() {
     const used = s => S.sapps.filter(a => a.schoId === s.id && a.status === "approved").length;
-    return `<p><button class="btn" data-a="newsch">+ New scholarship</button></p>` + card("Scholarships", table(["Scholarship", "Requirements", "Deadline · Slots", "Status", "Actions"],
+    return `<p><button class="btn" data-a="newsch">+ New scholarship</button> <button class="btn alt" data-a="sample">Add sample scholarships</button></p>` + card("Scholarships", table(["Scholarship", "Requirements", "Deadline · Slots", "Status", "Actions"],
       S.schos.map(s => [`<b>${esc(s.name)}</b><br><small>${esc(sponsorText(s.provider))}</small>`, esc(reqText(s)), `${esc(s.deadline || "No deadline")}${s.slots ? ` · ${used(s)} / ${s.slots} filled` : ""}`, tag(s.status === "open" ? "Open" : "Closed"), btn("editsch", s.id, "Edit", "alt") + btn("togsch", s.id, s.status === "open" ? "Close" : "Open")])));
   },
   sapps() {
     return card("Scholarship applications", table(["Applicant", "Scholarship", "GWA · Income · Course", "Auto-check", "Status", "Actions"],
       S.sapps.map(a => {
         const s = S.schos.find(x => x.id === a.schoId), miss = s ? meets(s, a.form) : [];
-        return [`<b>${esc(a.name)}</b><br><small>${esc(a.email)}</small>`, esc(a.schoName), `${esc(a.form.gwa)}% · ₱${(+a.form.income).toLocaleString()}<br><small>${esc(a.form.course)}</small>`,
+        return [`<b>${esc(a.name)}</b><br><small>${esc(a.email)}</small>`, esc(a.schoName), `${esc(a.form.gwa)}% · ₱${(+a.form.income).toLocaleString()}<br><small>${esc(a.form.course)} · ${esc(coverText(a.form.coverage ?? (s ? coverage(s, a.form.gwa) : 0)))}</small>`,
           miss.length ? tag("Not qualified") + `<br><small>${esc(miss.join("; "))}</small>` : tag("Qualified"),
           tag(cap(a.status)) + (a.reason ? `<br><small>${esc(a.reason)}</small>` : ""),
           a.status === "pending" ? btn("sok", a.id, "Approve") + btn("sno", a.id, "Reject", "bad") : ""];
@@ -84,7 +126,7 @@ const pages = {
   apps() {
     const c = t => S.apps.filter(a => a.exam.status === t).length, n = (l, v, col) => `<div class="stat" style="--c:${col}"><small>${l}</small><b>${v}</b></div>`;
     return `<section class="stats">${n("Total applicants", S.apps.length, "var(--brand2)")}${n("Pending", c("pending"), "var(--wait)")}${n("Approved", c("approved"), "var(--ok)")}${n("Rejected", c("rejected"), "var(--bad)")}</section>` + card("Examination applications", table(["Applicant", "School · Course", "GWA / Income", "Status", "Actions"],
-      S.apps.map(a => { const f = a.exam.form; return [nm(a), `${esc(f.school)}<br><small>${esc(f.course)}</small>`, `${f.gwa}% · ₱${(+f.income).toLocaleString()}`, tag(exStat(a)) + (a.exam.reason ? `<br><small>${esc(a.exam.reason)}</small>` : ""), a.exam.status === "pending" ? btn("approve", a.id, "Approve") + btn("reject", a.id, "Reject", "bad") : ""]; }), ["Pending", "Approved", "Rejected"]));
+      S.apps.map(a => { const f = a.exam.form; return [nm(a), `${esc(f.school)}<br><small>${esc(f.course)}${f.schoName ? " · " + esc(f.schoName) : ""}</small>`, `${f.gwa}% · ₱${(+f.income).toLocaleString()}`, tag(exStat(a)) + (a.exam.reason ? `<br><small>${esc(a.exam.reason)}</small>` : ""), a.exam.status === "pending" ? btn("approve", a.id, "Approve") + btn("reject", a.id, "Reject", "bad") : ""]; }), ["Pending", "Approved", "Rejected"]));
   },
   sched() {
     const ok = S.apps.filter(a => a.exam.status === "approved");
@@ -96,11 +138,18 @@ const pages = {
       a.result.published ? "" : btn("pass", a.id, "Pass") + btn("fail", a.id, "Fail", "bad") + (a.result.status !== "awaiting" ? btn("pubres", a.id, "Publish") : "")]), ["Awaiting", "Passed", "Failed"]));
   },
   docs() {
-    return card("Submitted documents", table(["Applicant", "Document", "Status", "Actions"], S.docs.map(d => {
-      const a = S.apps.find(x => x.id === d.uid) || { name: d.uid, appId: "" };
-      return [nm(a), `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.name)}</a><br><small>${esc(d.fileName)}</small>`, tag(d.status === "correction" ? "Correction" : d.status[0].toUpperCase() + d.status.slice(1)) + (d.reason ? `<br><small>${esc(d.reason)}</small>` : ""),
-        d.status === "submitted" ? btn("dok", d.id, "Approve") + btn("dfix", d.id, "Request correction", "bad") : ""];
-    }), ["Submitted", "Approved", "Rejected", "Correction"]));
+    if (docUser) return docDetail(docUser);
+    const pending = id => dstat(id).filter(d => d.status === "submitted").length;
+    const ids = [...new Set(S.docs.map(d => d.uid))].sort((x, y) => pending(y) - pending(x));
+    return card("Applicants with submitted documents", table(["Applicant", "Approved", "Status", "Action"], ids.map(id => {
+      const a = S.apps.find(x => x.id === id) || { name: id, appId: "" }, ds = dstat(id);
+      const n = st => ds.filter(d => d.status === st).length, p = pending(id);
+      const tg = p ? tag("Submitted") + `<br><small>${p} to review</small>`
+        : n("correction") ? tag("Correction") + `<br><small>Waiting for resubmission</small>`
+        : n("rejected") ? tag("Rejected")
+        : tag("Approved");
+      return [nm(a), `${n("approved")} / ${ds.length}`, tg, btn("dview", id, "View documents")];
+    }), ["Submitted", "Correction", "Rejected", "Approved"]));
   },
   ann() {
     return `<p><button class="btn" data-a="newann">+ New announcement</button></p>` + card("Announcements", table(["Title", "Date", "Status", "Actions"], S.ann.map(n => [`<b>${esc(n.title)}</b><br><small>${esc(n.body)}</small>`, when(n.ts), tag(n.status === "published" ? "Published" : "Archived"), btn("editann", n.id, "Edit", "alt") + btn("togann", n.id, n.status === "published" ? "Archive" : "Publish")])));
@@ -109,6 +158,129 @@ const pages = {
     return card("Applicants", table(["Applicant", "Email", "Stage", "Action"], S.apps.map(a => [nm(a), esc(a.email), a.result.published ? "Documents" : a.schedule ? "Exam" : a.exam.status === "rejected" ? "Rejected" : a.exam.status === "approved" ? "Approved" : "Pending review", btn("hist", a.id, "History", "alt")])));
   },
 };
+
+/* ---------- audit + review helpers ---------- */
+const ENROLL_MAX = 3; /* keep in sync with enroll.js and firestore.rules */
+const aud = (action, targetType, targetId, summary, o = {}) =>
+  logAudit({ action, targetType, targetId, summary, role: "admin", ...o }).catch(e => console.warn("Audit not written:", e));
+const flat = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k.replace(/\./g, "_"), v]));
+const FLD = [["name", "Name"], ["provider", "Provider"], ["description", "Description"], ["maxIncome", "Max income"], ["slots", "Slots"], ["deadline", "Deadline"]];
+const diff = (o, n) => [...FLD.map(([k, l]) => [l, o[k], n[k]]), ...[25, 50, 75, 100].map(p => [`GWA for ${p}%`, tiersOf(o)["t" + p], n.tiers["t" + p]])]
+  .map(([l, x, y]) => [l, String(x || ""), String(y || "")]).filter(([, x, y]) => x !== y);
+
+async function loadAudit() {
+  try { S.audit = (await getDocs(query(collection(db, "auditLogs"), orderBy("ts", "desc"), limit(500)))).docs.map(d => ({ id: d.id, ...d.data() })); }
+  catch (e) { console.error(e); S.audit = []; toast("Could not load the audit log: " + (e.code || e.message)); }
+}
+
+function exportAudit() {
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const rows = [["Time", "Actor", "Role", "Action", "Target type", "Target id", "Summary", "Reason"], ...(S.audit || []).map(x =>
+    [x.ts?.seconds ? new Date(x.ts.seconds * 1000).toISOString() : "", x.actorEmail, x.actorRole, x.action, x.targetType, x.targetId, x.summary, x.reason])];
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + rows.map(r => r.map(q).join(",")).join("\n")], { type: "text/csv" }));
+  a.download = "avenza-audit-" + new Date().toISOString().slice(0, 10) + ".csv"; a.click(); URL.revokeObjectURL(a.href);
+  aud("audit.exported", "auditLog", "csv", `Exported ${(S.audit || []).length} entries`);
+}
+
+/* Enrollment review: details and ID documents side by side, then approve or decline. */
+function reviewEnroll(id) {
+  const e = S.enr.find(x => x.id === id); if (!e) return;
+  const f = e.form || {}, row = (l, v) => `<dt>${l}</dt><dd>${esc(v || "-")}</dd>`, pending = e.status === "pending", locked = e.status === "declined" && (e.attempt || 1) >= ENROLL_MAX + (e.bonus || 0);
+  const d = document.createElement("dialog"); d.className = "wide";
+  d.innerHTML = `<div class="dlg"><h3>Enrollment review</h3>
+    <div class="cols2"><div><h4>Personal</h4><dl class="sum">${row("Name", f.name)}${row("Birthdate", f.birthdate)}${row("Mobile", f.phone)}${row("Address", f.address)}</dl>
+    <h4>Household</h4><dl class="sum">${row("Annual income", f.income ? "₱" + (+f.income).toLocaleString() : "")}${row("Guardian", f.guardian)}${row("Guardian mobile", f.guardianPhone)}</dl></div>
+    <div><h4>Academic</h4><dl class="sum">${row("School", f.school)}${row("Strand", f.strand)}${row("LRN", f.lrn)}${row("Course", f.course)}${row("GWA", f.gwa ? f.gwa + "%" : "")}</dl>
+    <h4>Documents</h4><ul class="plain files">${(e.files || []).map(x => `<li><a href="#" data-file="${esc(x.path)}" data-doc="${esc(e.id)}">${esc(x.label)}</a> <small>${esc(x.name)}</small></li>`).join("") || "<li>No files</li>"}</ul></div></div>
+    ${pending ? "" : `<p class="note">${esc(cap(e.status))}${e.reviewedBy ? " by " + esc(e.reviewedBy) : ""}${e.reason ? ". Reason: " + esc(e.reason) : ""}</p>`}
+    <div class="acts"><button class="alt" data-x="close">Close</button>${pending ? `<button class="bad" data-x="declined">Decline</button><button data-x="approved">Approve</button>` : ""}${locked ? `<button data-x="bonus">Allow another attempt</button>` : ""}</div></div>`;
+  document.body.append(d);
+  d.addEventListener("close", () => d.remove());
+  d.addEventListener("click", async ev => {
+    const b = ev.target.closest("[data-x]"); if (!b) return;
+    if (b.dataset.x === "close") { d.close(); return; }
+    if (b.dataset.x === "bonus") {
+      if (!await ask("Are you sure you want to allow another attempt?", [], "Yes, allow", `<p class="note">${esc(f.name)} used all ${ENROLL_MAX + (e.bonus || 0)} enrollment attempts. This gives one more.</p>`)) return;
+      d.close(); grantAttempt(e); return;
+    }
+    if (b.dataset.x === "approved") {
+      if (!await ask("Are you sure you want to approve " + f.name + "?", [], "Yes, approve", `<p class="note">This verifies their details and unlocks the student portal.</p><dl class="sum"><dt>GWA typed by student</dt><dd>${esc(f.gwa)}%</dd></dl><label class="chk"><input type="checkbox" required> I compared this GWA with the uploaded grade report and they match.</label>`)) return;
+      d.close(); decideEnroll(e, "approved", "");
+    } else {
+      const r = await ask("Decline enrollment", [{ k: "r", label: "Reason (required, the student will see it)", area: 1, req: 1 }], "Continue");
+      if (!r) return;
+      const why = r.r.trim();
+      if (!await ask("Are you sure you want to decline this enrollment?", [], "Yes, decline", `<p class="note warn">${esc(f.name)} will see this reason:</p><blockquote>${esc(why)}</blockquote>`)) return;
+      d.close(); decideEnroll(e, "declined", why);
+    }
+  });
+  d.showModal();
+}
+
+/* Gives a locked-out student one more enrollment attempt. */
+async function grantAttempt(e) {
+  const f = e.form || {}, now = serverTimestamp(), batch = writeBatch(db), msg = "The scholarship office gave you one more enrollment attempt. Please fix your enrollment and submit it again.";
+  batch.update(doc(db, "enrollments", e.id), { bonus: (e.bonus || 0) + 1 });
+  stageAudit(batch, { action: "enrollment.attempt_granted", targetType: "enrollment", targetId: e.id, summary: `${f.name}: one more enrollment attempt`, before: { allowed: ENROLL_MAX + (e.bonus || 0) }, after: { allowed: ENROLL_MAX + (e.bonus || 0) + 1 }, role: "admin" });
+  batch.set(doc(collection(db, "notifications")), { uid: e.id, text: msg, ts: now });
+  try { await batch.commit(); mailIt(e.email, msg); await load(); toast("One more attempt granted."); }
+  catch (er) { console.error(er); toast("Failed: " + (er.code || er.message)); }
+}
+
+/* One atomic write: decision + verified profile + audit entry + notification. */
+async function decideEnroll(e, status, reason) {
+  const f = e.form || {}, now = serverTimestamp(), batch = writeBatch(db);
+  const msg = status === "approved" ? "Your enrollment was approved. You can now use Avenza." : "Your enrollment was declined. Reason: " + reason + " Please fix it and resubmit.";
+  batch.update(doc(db, "enrollments", e.id), { status, reason, reviewedBy: S.u.email, reviewedByUid: S.u.uid, reviewedAt: now });
+  if (status === "approved") batch.set(doc(db, "users", e.id), { name: f.name, phone: f.phone, address: f.address, school: f.school, strand: f.strand, course: f.course, birthdate: f.birthdate, gwa: f.gwa, income: f.income, gwaVerified: true, verified: true, verifiedAt: now }, { merge: true });
+  stageAudit(batch, { action: "enrollment." + status, targetType: "enrollment", targetId: e.id, summary: `${f.name}: enrollment ${status}`, reason, before: { status: e.status }, after: status === "approved" ? { status, gwa: f.gwa, gwaChecked: true } : { status }, role: "admin" });
+  batch.set(doc(collection(db, "notifications")), { uid: e.id, text: msg, ts: now });
+  try { await batch.commit(); mailIt(e.email, msg); await load(); toast("Enrollment " + status + "."); }
+  catch (er) { console.error(er); toast("Failed: " + (er.code || er.message) + ". Nothing was changed."); }
+}
+
+/* Profile change review: current value, requested value, reason and proof. */
+function reviewChange(id) {
+  const c = S.chg.find(x => x.id === id); if (!c) return;
+  const row = (l, v) => `<dt>${l}</dt><dd>${esc(v || "-")}</dd>`, pending = c.status === "pending";
+  const d = document.createElement("dialog");
+  d.innerHTML = `<div class="dlg"><h3>Change request</h3>
+    <dl class="sum">${row("Student", c.name)}${row("Detail", c.label)}${row("Current value", c.oldValue)}${row("Requested value", c.newValue)}${row("Reason", c.reason)}</dl>
+    <h4>Proof</h4><ul class="plain files">${(c.files || []).map(x => `<li><a href="#" data-file="${esc(x.path)}" data-doc="${esc(c.id)}">${esc(x.label)}</a> <small>${esc(x.name)}</small></li>`).join("") || "<li>No proof attached</li>"}</ul>
+    ${pending ? "" : `<p class="note">${esc(cap(c.status))}${c.reviewedBy ? " by " + esc(c.reviewedBy) : ""}${c.decision ? ". Reason: " + esc(c.decision) : ""}</p>`}
+    <div class="acts"><button class="alt" data-x="close">Close</button>${pending ? `<button class="bad" data-x="declined">Decline</button><button data-x="approved">Approve</button>` : ""}</div></div>`;
+  document.body.append(d);
+  d.addEventListener("close", () => d.remove());
+  d.addEventListener("click", async ev => {
+    const b = ev.target.closest("[data-x]"); if (!b) return;
+    if (b.dataset.x === "close") { d.close(); return; }
+    if (b.dataset.x === "approved") {
+      const proof = (c.files || []).length ? `<label class="chk"><input type="checkbox" required> I opened the proof and it supports this change.</label>` : `<p class="note warn">No proof was attached.</p>`;
+      if (!await ask(`Are you sure you want to change ${c.label} to "${c.newValue}"?`, [], "Yes, approve", proof)) return;
+      d.close(); decideChange(c, "approved", "");
+    } else {
+      const r = await ask("Decline change request", [{ k: "r", label: "Reason (required, the student will see it)", area: 1, req: 1 }], "Continue");
+      if (!r) return;
+      const why = r.r.trim();
+      if (!await ask("Are you sure you want to decline this request?", [], "Yes, decline", `<p class="note warn">${esc(c.name)} will see this reason:</p><blockquote>${esc(why)}</blockquote>`)) return;
+      d.close(); decideChange(c, "declined", why);
+    }
+  });
+  d.showModal();
+}
+
+async function decideChange(c, status, reason) {
+  const now = serverTimestamp(), batch = writeBatch(db);
+  const msg = status === "approved" ? `Your request was approved. Your ${c.label} is now updated.` : `Your request to change ${c.label} was declined. Reason: ${reason}`;
+  batch.update(doc(db, "changeRequests", c.id), { status, decision: reason, reviewedBy: S.u.email, reviewedByUid: S.u.uid, reviewedAt: now });
+  if (status === "approved") batch.set(doc(db, "users", c.uid), { [c.field]: c.field === "gwa" ? +c.newValue : c.newValue }, { merge: true });
+  stageAudit(batch, { action: "profile_change." + status, targetType: "changeRequest", targetId: c.id, summary: `${c.name}: ${c.label} ${c.oldValue} → ${c.newValue}`.slice(0, 300), reason,
+    before: { [c.field]: c.oldValue }, after: status === "approved" ? { [c.field]: c.newValue } : { status }, role: "admin" });
+  batch.set(doc(collection(db, "notifications")), { uid: c.uid, text: msg, ts: now });
+  try { await batch.commit(); mailIt(c.email, msg); await load(); toast("Request " + status + "."); }
+  catch (er) { console.error(er); toast("Failed: " + (er.code || er.message) + ". Nothing was changed."); }
+}
 
 function render() {
   $("ptitle").textContent = TITLES[page];
@@ -120,11 +292,12 @@ function render() {
 /* Write a change, log it in history, notify the student. Only reports success if the write worked. */
 async function act(id, changes, log, note) {
   try {
-    await updateDoc(doc(db, "applications", id), { ...changes, history: arrayUnion(history(S.u.email, log)) });
+    await updateDoc(doc(db, "applications", id), { ...changes, history: arrayUnion(entry(S.u.email, log)) });
     if (note) {
       await addDoc(collection(db, "notifications"), { uid: id, text: note, ts: serverTimestamp() });
       mailIt((S.apps.find(a => a.id === id) || {}).email, note);
     }
+    aud("application.updated", "application", id, log, { after: flat(changes) });
     await load(); toast("Saved: " + log);
   } catch (e) { console.error(e); toast("Failed: " + (e.code || e.message) + ". Nothing was changed."); }
 }
@@ -135,17 +308,19 @@ async function docAct(id, status, reason, note) {
     const msg = note.replace("{n}", d.name) + (reason ? " Reason: " + reason : "");
     await addDoc(collection(db, "notifications"), { uid: d.uid, text: msg, ts: serverTimestamp() });
     mailIt((S.apps.find(a => a.id === d.uid) || {}).email, msg);
-    await updateDoc(doc(db, "applications", d.uid), { history: arrayUnion(history(S.u.email, `${d.name}: ${status}`)) });
+    await updateDoc(doc(db, "applications", d.uid), { history: arrayUnion(entry(S.u.email, `${d.name}: ${status}`)) });
+    aud("document." + status, "document", id, `${d.name}: ${status}`, { reason });
     await load(); toast("Saved.");
   } catch (e) { console.error(e); toast("Failed: " + (e.code || e.message)); }
 }
 
 async function sAct(x, status, reason) {
   try {
-    await updateDoc(doc(db, "scholarshipApps", x.id), { status, reason, reviewedBy: S.u.email, history: arrayUnion(history(S.u.email, `Scholarship application ${status}`)) });
+    await updateDoc(doc(db, "scholarshipApps", x.id), { status, reason, reviewedBy: S.u.email, history: arrayUnion(entry(S.u.email, `Scholarship application ${status}`)) });
     const msg = `Your application for ${x.schoName} was ${status}.` + (reason ? " Reason: " + reason : "");
     await addDoc(collection(db, "notifications"), { uid: x.uid, text: msg, ts: serverTimestamp() });
     mailIt(x.email, msg);
+    aud("scholarship_app." + status, "scholarshipApp", x.id, `${x.name}: ${x.schoName} ${status}`, { reason });
     await load(); toast("Saved.");
   } catch (e) { console.error(e); toast("Failed: " + (e.code || e.message) + ". Nothing was changed."); }
 }
@@ -158,48 +333,101 @@ document.addEventListener("input", e => {
 
 document.addEventListener("click", async e => {
   const n = e.target.closest("#nav [data-p]");
-  if (n) { page = n.dataset.p; render(); return; }
+  if (n) { page = n.dataset.p; docUser = null; if (page === "audit") await loadAudit(); render(); return; }
+  const fl = e.target.closest("[data-file]");
+  if (fl) {
+    e.preventDefault();
+    const w = window.open("", "_blank"); if (w) w.opener = null;
+    try {
+      const url = fl.dataset.file ? await signedUrl(fl.dataset.file) : fl.dataset.url;
+      if (!url) throw new Error("No file attached");
+      if (w) w.location.href = url; else location.href = url;
+      aud("document.viewed", "document", fl.dataset.doc || "", "Opened " + (fl.textContent || "a file"));
+    } catch (er) { if (w) w.close(); toast("Could not open the file: " + er.message); }
+    return;
+  }
   const b = e.target.closest("[data-a]"); if (!b) return;
   const id = b.dataset.id, A = S.apps.find(x => x.id === id), k = b.dataset.a;
-  if (k === "approve" && await ask("Approve this application?", [], "Approve")) act(id, { "exam.status": "approved", "exam.reason": "" }, "Exam application approved", "Your examination application was approved. Your schedule will be posted soon.");
-  if (k === "reject") { const r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Reject"); if (r) act(id, { "exam.status": "rejected", "exam.reason": r.r.trim() }, "Exam application rejected", "Your examination application was rejected. Reason: " + r.r.trim()); }
-  if (k === "sched") { const v = A.schedule || {}, r = await ask("Exam schedule · " + A.name, [{ k: "date", label: "Date", type: "date", v: v.date, req: 1 }, { k: "time", label: "Time", type: "time", v: v.time, req: 1 }, { k: "location", label: "Location / meeting link", v: v.location, req: 1 }, { k: "notes", label: "Instructions", area: 1, v: v.notes }], "Publish"); if (r) act(id, { schedule: { ...r, published: true } }, A.schedule ? "Exam schedule changed" : "Exam schedule published", A.schedule ? "Your exam schedule was changed. Check Application Status." : "Your exam schedule is published. Check Application Status."); }
-  if (k === "pass" || k === "fail") act(id, { "result.status": k === "pass" ? "passed" : "failed" }, "Result recorded: " + (k === "pass" ? "passed" : "failed"));
-  if (k === "pubres" && await ask("Publish result for " + A.name + "?", [], "Publish")) act(id, { "result.published": true }, "Exam result published", A.result.status === "passed" ? "Your exam result is out: you passed. Document submission is now open." : "Your exam result is out. Check Application Status.");
-  if (k === "dok") docAct(id, "approved", "", "Document approved: {n}.");
-  if (k === "dfix") { const r = await ask("Request correction", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Send"); if (r) docAct(id, "correction", r.r.trim(), "Correction requested for {n}."); }
+  if (k === "dview") { docUser = id; render(); scrollTo(0, 0); return; }
+  if (k === "dback") { docUser = null; render(); return; }
+  if (k === "enrview") { reviewEnroll(id); return; }
+  if (k === "chgview") { reviewChange(id); return; }
+  if (k === "auditcsv") { exportAudit(); return; }
+  if (k === "approve" && await ask("Are you sure you want to approve this application?", [], "Yes, approve")) act(id, { "exam.status": "approved", "exam.reason": "" }, "Exam application approved", "Your examination application was approved. Your schedule will be posted soon.");
+  if (k === "reject") { const r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Continue"); if (r && await ask("Are you sure you want to reject this application?", [], "Yes, reject", `<p class="note warn">The student will see: ${esc(r.r.trim())}</p>`)) act(id, { "exam.status": "rejected", "exam.reason": r.r.trim() }, "Exam application rejected", "Your examination application was rejected. Reason: " + r.r.trim()); }
+  if (k === "sched") { const v = A.schedule || {}, r = await ask("Exam schedule · " + A.name, [{ k: "date", label: "Date", type: "date", v: v.date, req: 1 }, { k: "time", label: "Time", type: "time", v: v.time, req: 1 }, { k: "location", label: "Location / meeting link", v: v.location, req: 1 }, { k: "notes", label: "Instructions", area: 1, v: v.notes }], "Review"); if (r && await ask(A.schedule ? "Are you sure you want to change the exam schedule?" : "Are you sure you want to publish the exam schedule?", [], "Yes, publish", `<p class="note">${esc(A.name)} will be notified.</p><dl class="sum"><dt>Date</dt><dd>${esc(r.date)}</dd><dt>Time</dt><dd>${esc(r.time)}</dd><dt>Location</dt><dd>${esc(r.location)}</dd></dl>`)) act(id, { schedule: { ...r, published: true } }, A.schedule ? "Exam schedule changed" : "Exam schedule published", A.schedule ? "Your exam schedule was changed. Check Application Status." : "Your exam schedule is published. Check Application Status."); }
+  if ((k === "pass" || k === "fail") && await ask(`Are you sure you want to record ${k === "pass" ? "PASS" : "FAIL"} for ${A.name}?`, [], "Yes, record", `<p class="note">It stays hidden from the student until you publish it.</p>`)) act(id, { "result.status": k === "pass" ? "passed" : "failed" }, "Result recorded: " + (k === "pass" ? "passed" : "failed"));
+  if (k === "pubres" && await ask("Are you sure you want to publish the result for " + A.name + "?", [], "Yes, publish", `<p class="note warn">The student is notified and can see it right away.</p>`)) act(id, { "result.published": true }, "Exam result published", A.result.status === "passed" ? "Your exam result is out: you passed. Document submission is now open." : "Your exam result is out. Check Application Status.");
+  if (k === "dok" && await ask("Are you sure you want to approve this document?", [], "Yes, approve")) docAct(id, "approved", "", "Document approved: {n}.");
+  if (k === "dfix") { const r = await ask("Request correction", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Continue"); if (r && await ask("Are you sure you want to request a correction?", [], "Yes, send", `<p class="note warn">The student will see: ${esc(r.r.trim())}</p>`)) docAct(id, "correction", r.r.trim(), "Correction requested for {n}."); }
   if (k === "hist") ask("History · " + A.name, [], "", `<ul class="plain">${[...A.history].reverse().map(h => `<li>${esc(h.text)}<br><small>${new Date(h.t).toLocaleString()} · ${esc(h.by)}</small></li>`).join("")}</ul>`);
+  if (k === "sample") {
+    if (!await ask("Are you sure you want to add sample scholarships?", [], "Yes, add", `<p class="note">Adds 7 example scholarships so the Browse page has content. They are labelled as samples and you can close or edit them any time.</p>`)) return;
+    const S7 = [["Academic Excellence Scholarship", "Rewards consistently high grades across all subjects."], ["Community Leaders Grant", "For students active in school or barangay organizations."], ["STEM Future Scholarship", "Supports students aiming for science, technology, engineering or math."], ["Arts and Culture Grant", "For students in the arts, music, writing or design."], ["First-Generation Student Aid", "For students who are the first in their family to attend college."], ["Public Service Scholarship", "For students who plan to work in government or non-profit service."], ["Athlete Scholar Grant", "For student-athletes who balance sports and academics."]];
+    try {
+      const batch = writeBatch(db);
+      S7.forEach(([name, description], i) => batch.set(doc(collection(db, "scholarships")), { name, provider: "Sample sponsor", description: description + " (Sample data)", minGwa: 80, tiers: { t25: 80, t50: 85, t75: 90, t100: 95 }, maxIncome: [0, 300000, 0, 0, 250000, 0, 0][i], courses: [], slots: 10, deadline: "", status: "open", createdAt: serverTimestamp() }));
+      await batch.commit(); aud("scholarship.samples_added", "scholarship", "samples", "Added 7 sample scholarships"); await load(); toast("Sample scholarships added.");
+    } catch (er) { toast("Failed: " + (er.code || er.message)); }
+    return;
+  }
   if (k === "newsch" || k === "editsch") {
     const s = S.schos.find(x => x.id === id) || {};
     const r = await ask(s.id ? "Edit scholarship" : "New scholarship", [
       { k: "name", label: "Scholarship name", v: s.name, req: 1 },
       { k: "provider", label: "Provider / sponsor", v: sponsorText(s.provider) },
       { k: "description", label: "Description", v: s.description, area: 1, req: 1 },
-      { k: "minGwa", label: "Minimum GWA % (blank = none)", v: s.minGwa || "" },
+      { k: "t25", label: "Minimum GWA for 25% (financial assistance)", type: "number", v: tiersOf(s).t25, req: 1 },
+      { k: "t50", label: "Minimum GWA for 50% (half scholarship)", type: "number", v: tiersOf(s).t50, req: 1 },
+      { k: "t75", label: "Minimum GWA for 75% (three-quarter)", type: "number", v: tiersOf(s).t75, req: 1 },
+      { k: "t100", label: "Minimum GWA for 100% (full scholarship)", type: "number", v: tiersOf(s).t100, req: 1 },
       { k: "maxIncome", label: "Max annual household income ₱ (blank = none)", v: s.maxIncome || "" },
-      { k: "courses", label: "Allowed courses, comma-separated (blank = any)", v: (s.courses || []).join(", ") },
       { k: "slots", label: "Number of slots (blank = unlimited)", v: s.slots || "" },
       { k: "deadline", label: "Deadline", type: "date", v: s.deadline }
     ], "Save");
     if (r) {
-      const data = { name: r.name.trim(), provider: r.provider.trim(), description: r.description.trim(), minGwa: +r.minGwa || 0, maxIncome: +r.maxIncome || 0, courses: r.courses.split(",").map(x => x.trim()).filter(Boolean), slots: +r.slots || 0, deadline: r.deadline || "" };
-      try { s.id ? await updateDoc(doc(db, "scholarships", id), data) : await addDoc(collection(db, "scholarships"), { ...data, status: "open", createdAt: serverTimestamp() }); await load(); toast("Scholarship saved."); } catch (er) { toast("Failed: " + (er.code || er.message)); }
+      const tr = { t25: +r.t25, t50: +r.t50, t75: +r.t75, t100: +r.t100 }, tv = Object.values(tr);
+      if (tv.some(v => !(v >= 0 && v <= 100)) || tv.some((v, i) => i && v < tv[i - 1])) { toast("GWA levels must be between 0 and 100 and go up: 25% ≤ 50% ≤ 75% ≤ 100%."); return; }
+      const data = { name: r.name.trim(), provider: r.provider.trim(), description: r.description.trim(), minGwa: tr.t25, tiers: tr, maxIncome: +r.maxIncome || 0, courses: [], slots: +r.slots || 0, deadline: r.deadline || "" };
+      const ch = s.id ? diff(s, data) : [];
+      if (s.id && !ch.length) { toast("No changes to save."); return; }
+      const detail = s.id ? `<ul class="plain">${ch.map(c => `<li><b>${esc(c[0])}</b>: ${esc(c[1] || "none")} → ${esc(c[2] || "none")}</li>`).join("")}</ul>` : `<p class="note">${esc(data.name)}: ${esc(reqText(data))}. It opens to students immediately.</p>`;
+      if (!await ask(s.id ? "Are you sure you want to save these changes?" : "Are you sure you want to publish this scholarship?", [], "Yes, confirm", detail)) return;
+      try {
+        let sid = id;
+        if (s.id) await updateDoc(doc(db, "scholarships", id), data); else sid = (await addDoc(collection(db, "scholarships"), { ...data, status: "open", createdAt: serverTimestamp() })).id;
+        aud(s.id ? "scholarship.updated" : "scholarship.created", "scholarship", sid, data.name, { before: s.id ? Object.fromEntries(ch.map(c => [c[0], c[1]])) : null, after: s.id ? Object.fromEntries(ch.map(c => [c[0], c[2]])) : data });
+        await load(); toast("Scholarship saved.");
+      } catch (er) { toast("Failed: " + (er.code || er.message)); }
     }
   }
-  if (k === "togsch") { const s = S.schos.find(x => x.id === id); try { await updateDoc(doc(db, "scholarships", id), { status: s.status === "open" ? "closed" : "open" }); await load(); toast("Updated."); } catch (er) { toast("Failed: " + (er.code || er.message)); } }
+  if (k === "togsch") {
+    const s = S.schos.find(x => x.id === id), to = s.status === "open" ? "closed" : "open";
+    if (!await ask(`Are you sure you want to ${to === "closed" ? "close" : "reopen"} "${s.name}"?`, [], "Yes, confirm", `<p class="note">${to === "closed" ? "Students will no longer be able to apply." : "Students will be able to apply again."}</p>`)) return;
+    try { await updateDoc(doc(db, "scholarships", id), { status: to }); aud("scholarship." + (to === "closed" ? "closed" : "reopened"), "scholarship", id, s.name, { before: { status: s.status }, after: { status: to } }); await load(); toast("Updated."); } catch (er) { toast("Failed: " + (er.code || er.message)); }
+  }
   if (k === "sok") {
     const x = S.sapps.find(y => y.id === id), s = S.schos.find(y => y.id === x.schoId);
     const full = s?.slots && S.sapps.filter(y => y.schoId === x.schoId && y.status === "approved").length >= s.slots;
     const miss = s ? meets(s, x.form) : [];
-    const warn = (full ? `<p class="note">All ${s.slots} slots are already filled.</p>` : "") + (miss.length ? `<p class="note">Does not meet: ${esc(miss.join("; "))}.</p>` : "");
-    if (await ask("Approve " + x.name + " for " + x.schoName + "?", [], "Approve", warn)) sAct(x, "approved", "");
+    const warn = `<p class="note good">Coverage: ${esc(coverText(x.form.coverage ?? (s ? coverage(s, x.form.gwa) : 0)))}</p>` + (full ? `<p class="note">All ${s.slots} slots are already filled.</p>` : "") + (miss.length ? `<p class="note">Does not meet: ${esc(miss.join("; "))}.</p>` : "");
+    if (await ask("Are you sure you want to approve " + x.name + " for " + x.schoName + "?", [], "Yes, approve", warn)) sAct(x, "approved", "");
   }
-  if (k === "sno") { const x = S.sapps.find(y => y.id === id), r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Reject"); if (r) sAct(x, "rejected", r.r.trim()); }
+  if (k === "sno") { const x = S.sapps.find(y => y.id === id), r = await ask("Reject application", [{ k: "r", label: "Reason (required)", area: 1, req: 1 }], "Continue"); if (r && await ask("Are you sure you want to reject this scholarship application?", [], "Yes, reject", `<p class="note warn">The student will see: ${esc(r.r.trim())}</p>`)) sAct(x, "rejected", r.r.trim()); }
   if (k === "newann" || k === "editann") {
-    const n = S.ann.find(x => x.id === id) || {}, r = await ask(n.id ? "Edit announcement" : "New announcement", [{ k: "title", label: "Title", v: n.title, req: 1 }, { k: "body", label: "Message", v: n.body, area: 1, req: 1 }], "Publish");
-    if (r) try { n.id ? await updateDoc(doc(db, "announcements", id), { title: r.title, body: r.body }) : await addDoc(collection(db, "announcements"), { ...r, status: "published", ts: serverTimestamp() }); await load(); toast("Announcement saved."); } catch (er) { toast("Failed: " + er.code); }
+    const n = S.ann.find(x => x.id === id) || {}, r = await ask(n.id ? "Edit announcement" : "New announcement", [{ k: "title", label: "Title", v: n.title, req: 1 }, { k: "body", label: "Message", v: n.body, area: 1, req: 1 }], "Review");
+    if (!r) return;
+    const title = r.title.trim(), body = r.body.trim();
+    if (n.id && title === n.title && body === n.body) { toast("No changes to save."); return; }
+    const preview = `<dl class="sum"><dt>Title</dt><dd>${esc(title)}</dd><dt>Message</dt><dd>${esc(body)}</dd></dl>`;
+    if (!await ask(n.id ? "Are you sure you want to save changes to this announcement?" : "Are you sure you want to publish this announcement?", [], n.id ? "Yes, save" : "Yes, publish",
+      `<p class="note">${n.id ? "Students will see the updated text." : "Every student will see it right away, and as a pop-up the next time they open the dashboard."}</p>${preview}`)) return;
+    try { n.id ? await updateDoc(doc(db, "announcements", id), { title, body }) : await addDoc(collection(db, "announcements"), { title, body, status: "published", ts: serverTimestamp() }); aud(n.id ? "announcement.updated" : "announcement.created", "announcement", id || "new", title, n.id ? { before: { title: n.title, body: n.body }, after: { title, body } } : { after: { title, body } }); await load(); toast("Announcement saved."); } catch (er) { toast("Failed: " + er.code); }
   }
-  if (k === "togann") { const n = S.ann.find(x => x.id === id); try { await updateDoc(doc(db, "announcements", id), { status: n.status === "published" ? "archived" : "published" }); await load(); toast("Updated."); } catch (er) { toast("Failed: " + er.code); } }
+  if (k === "togann") {
+    const n = S.ann.find(x => x.id === id), hide = n.status === "published";
+    if (!await ask(hide ? "Are you sure you want to archive this announcement?" : "Are you sure you want to publish this announcement again?", [], hide ? "Yes, archive" : "Yes, publish", `<p class="note">${hide ? "Students will no longer see it." : "Students will see it again."}</p><dl class="sum"><dt>Title</dt><dd>${esc(n.title)}</dd></dl>`)) return;
+    try { await updateDoc(doc(db, "announcements", id), { status: n.status === "published" ? "archived" : "published" }); aud("announcement." + (n.status === "published" ? "archived" : "published"), "announcement", id, n.title); await load(); toast("Updated."); } catch (er) { toast("Failed: " + er.code); } }
 });
 
 document.addEventListener("submit", async e => {
@@ -209,5 +437,6 @@ document.addEventListener("submit", async e => {
   for (const k of ["benefits", "courses", "quals", "docs"]) if (f[k].trim()) out[k] = f[k].split("\n").map(s => s.trim()).filter(Boolean);
   if (f.instructions.trim()) out.instructions = f.instructions.trim();
   if (f.deadlines.trim()) out.deadlines = f.deadlines.trim();
-  try { await setDoc(doc(db, "settings", "scholarship"), out); await load(); toast("Scholarship information saved."); } catch (er) { toast("Failed: " + er.code); }
+  if (!await ask("Are you sure you want to publish these changes?", [], "Yes, publish", `<p class="note">This changes what every student sees on the Scholarship page.</p>`)) return;
+  try { const before = S.set || {}; await setDoc(doc(db, "settings", "scholarship"), out); aud("settings.updated", "settings", "scholarship", "Program information updated", { before, after: out }); await load(); toast("Scholarship information saved."); } catch (er) { toast("Failed: " + er.code); }
 });

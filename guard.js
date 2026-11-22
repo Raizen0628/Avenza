@@ -18,6 +18,14 @@ onAuthStateChanged(auth, async function (user) {
   if (needAdmin && role !== "admin") { location.href = "dashboard.html"; return; }
   if (!needAdmin && role === "admin") { location.href = "admin.html"; return; }
 
+  /* Students must have an approved enrollment before they can use the portal. */
+  if (!needAdmin) {
+    let ok = false;
+    try { const e = await getDoc(doc(db, "enrollments", user.uid)); ok = e.exists() && e.data().status === "approved"; }
+    catch (err) { console.error("Enrollment check failed:", err); }
+    if (!ok) { location.href = "enroll.html"; return; }
+  }
+
   var first = (user.displayName || user.email || "User").split(" ")[0];
   var box = document.querySelector(".user");
   if (box) {
@@ -27,6 +35,13 @@ onAuthStateChanged(auth, async function (user) {
   }
   document.body.style.visibility = "visible";
 });
+
+setTimeout(function () {
+  if (document.body.style.visibility !== "visible") {
+    document.body.style.visibility = "visible";
+    document.body.innerHTML = '<p style="font:600 15px system-ui;padding:40px;text-align:center">We could not load this page. Check your connection and <a href="login.html">log in again</a>.</p>';
+  }
+}, 12000);
 
 document.querySelectorAll(".logout, .logout-menu").forEach(function (logout) {
   logout.addEventListener("click", async function (e) {

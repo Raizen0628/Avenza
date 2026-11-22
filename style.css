@@ -789,3 +789,42 @@ input[aria-invalid="true"] {
 .splash .logo{filter:drop-shadow(0 6px 16px rgba(94,63,196,.15))}
 .splash .actions button:not(.alt){background:linear-gradient(110deg,#3fb6e0,var(--brand2));color:#fff}
 .splash .actions button.alt{background:#fff;color:var(--brand)}
+
+/* ---------- Show / hide password ---------- */
+.pw { position: relative; display: block; }
+.pw input { padding-right: 50px; }
+
+.pw .eye {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.pw .eye:hover,
+.pw .eye:active {
+  transform: translateY(-50%);
+  filter: none;
+  box-shadow: none;
+  background: rgba(94, 63, 196, 0.12);
+  color: var(--brand);
+}
+
+.pw .eye svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
