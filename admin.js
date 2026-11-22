@@ -53,12 +53,13 @@ function table(cols, rows, statuses) {
 const btn = (act, id, label, cls = "") => `<button class="sm ${cls}" data-a="${act}" data-id="${id}">${label}</button>`;
 const card = (h, body) => `<section class="card"><div class="head"><h2>${h}</h2></div>${body}</section>`;
 const nm = a => `<b>${esc(a.name)}</b><br><small>${esc(a.appId)}</small>`;
+const sponsorText = provider => provider?.trim().toLowerCase() === "sample sponsor" ? "SM Foundation, Inc." : provider;
 
 const pages = {
   schos() {
     const used = s => S.sapps.filter(a => a.schoId === s.id && a.status === "approved").length;
     return `<p><button class="btn" data-a="newsch">+ New scholarship</button></p>` + card("Scholarships", table(["Scholarship", "Requirements", "Deadline · Slots", "Status", "Actions"],
-      S.schos.map(s => [`<b>${esc(s.name)}</b><br><small>${esc(s.provider)}</small>`, esc(reqText(s)), `${esc(s.deadline || "No deadline")}${s.slots ? ` · ${used(s)} / ${s.slots} filled` : ""}`, tag(s.status === "open" ? "Open" : "Closed"), btn("editsch", s.id, "Edit", "alt") + btn("togsch", s.id, s.status === "open" ? "Close" : "Open")])));
+      S.schos.map(s => [`<b>${esc(s.name)}</b><br><small>${esc(sponsorText(s.provider))}</small>`, esc(reqText(s)), `${esc(s.deadline || "No deadline")}${s.slots ? ` · ${used(s)} / ${s.slots} filled` : ""}`, tag(s.status === "open" ? "Open" : "Closed"), btn("editsch", s.id, "Edit", "alt") + btn("togsch", s.id, s.status === "open" ? "Close" : "Open")])));
   },
   sapps() {
     return card("Scholarship applications", table(["Applicant", "Scholarship", "GWA · Income · Course", "Auto-check", "Status", "Actions"],
@@ -172,7 +173,7 @@ document.addEventListener("click", async e => {
     const s = S.schos.find(x => x.id === id) || {};
     const r = await ask(s.id ? "Edit scholarship" : "New scholarship", [
       { k: "name", label: "Scholarship name", v: s.name, req: 1 },
-      { k: "provider", label: "Provider / sponsor", v: s.provider },
+      { k: "provider", label: "Provider / sponsor", v: sponsorText(s.provider) },
       { k: "description", label: "Description", v: s.description, area: 1, req: 1 },
       { k: "minGwa", label: "Minimum GWA % (blank = none)", v: s.minGwa || "" },
       { k: "maxIncome", label: "Max annual household income ₱ (blank = none)", v: s.maxIncome || "" },

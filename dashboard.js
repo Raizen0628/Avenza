@@ -16,7 +16,9 @@ const DEF = {
 };
 const S = { };
 const $ = id => document.getElementById(id);
-const TITLES = { home: "Home", apply: "Apply for Exam", browse: "Browse Scholarships", scholarship: "Scholarship", announcements: "Announcements", profile: "Profile" };
+const cleanSampleLabel = text => (text || "").replace(/\s*\(Sample data\)\s*/gi, "").trim();
+const sponsorText = provider => provider?.trim().toLowerCase() === "sample sponsor" ? "SM Foundation, Inc." : provider;
+const TITLES = { home: "Home", profile: "Profile", scholarship: "Scholarship", apply: "Apply for Exam", browse: "Browse Scholarships", announcements: "Announcements" };
 let page = "home";
 
 const ICON = { home: "", apply: "", browse: "", scholarship: "", announcements: "", profile: "" };
@@ -87,20 +89,20 @@ const pages = {
   },
   scholarship() {
     return `<section class="card"><div class="head"><h2>SM Foundation College Scholarship Program</h2></div>${NOTE}</section>
+    <div class="grid2"><section class="card"><div class="head"><h2>How to apply</h2></div><p style="font-size:.85rem;line-height:1.7">${esc(S.set.instructions)}</p></section>
+    <section class="card"><div class="head"><h2>Deadlines</h2></div><p style="font-size:.85rem;line-height:1.7">${esc(S.set.deadlines)}</p></section></div>
     <div class="grid2"><section class="card"><div class="head"><h2>Benefits</h2></div>${list(S.set.benefits)}</section>
     <section class="card"><div class="head"><h2>Priority courses</h2></div>${list(S.set.courses)}</section>
     <section class="card"><div class="head"><h2>Basic qualifications</h2></div>${list(S.set.quals)}</section>
-    <section class="card"><div class="head"><h2>Required documents</h2></div>${list(docsList())}<p class="note">Admin-confirmed list; opens only after you pass the exam.</p></section></div>
-    <div class="grid2"><section class="card"><div class="head"><h2>How to apply</h2></div><p style="font-size:.85rem;line-height:1.7">${esc(S.set.instructions)}</p></section>
-    <section class="card"><div class="head"><h2>Deadlines</h2></div><p style="font-size:.85rem;line-height:1.7">${esc(S.set.deadlines)}</p></section></div>`;
+    <section class="card"><div class="head"><h2>Required documents</h2></div>${list(docsList())}<p class="note">Admin-confirmed list; opens only after you pass the exam.</p></section></div>`;
   },
   browse() {
     const list = S.schos.filter(s => isOpen(s) || S.sapps[s.id]);
     return `<section class="card"><div class="head"><h2>Available scholarships</h2></div><p class="note">Choose a scholarship, check the requirements, then apply. An admin will review your application and notify you.</p></section>` +
       (list.length ? list.map(s => {
         const m = S.sapps[s.id], open = isOpen(s);
-        return `<section class="card"><div class="head"><h2>${esc(s.name)}</h2>${m ? tag(cap(m.status)) : tag(open ? "Open" : "Closed")}</div>
-        <small>${esc(s.provider)}</small><p style="font-size:.85rem;line-height:1.7">${esc(s.description)}</p>
+        return `<section class="card"><div class="head"><h2>${esc(cleanSampleLabel(s.name))}</h2>${m ? tag(cap(m.status)) : tag(open ? "Open" : "Closed")}</div>
+        <small>${esc(sponsorText(s.provider))}</small><p style="font-size:.85rem;line-height:1.7">${esc(s.description)}</p>
         <div class="row"><div><b>Requirements</b><small>${esc(reqText(s))}</small></div></div>
         <div class="row"><div><b>Deadline</b><small>${s.deadline ? esc(s.deadline) : "No deadline"}${s.slots ? " · " + s.slots + " slots" : ""}</small></div></div>
         ${m ? (m.status === "rejected" && m.reason ? `<p class="note">Reason: ${esc(m.reason)}</p>` : m.status === "approved" ? `<p class="note">Congratulations! You were approved for this scholarship.</p>` : `<p class="note">Your application is pending review.</p>`) : open ? `<p><button class="btn" data-sa="${esc(s.id)}">Apply</button></p>` : ""}</section>`;
@@ -151,6 +153,38 @@ function render() {
 }
 const go = p => { page = p; render(); scrollTo(0, 0); };
 const reload = async () => { await load(); render(); };
+
+const userMenu = document.getElementById("userMenu");
+const userMenuWrap = userMenu?.closest(".user-menu");
+if (userMenu && userMenuWrap) {
+  userMenu.addEventListener("click", e => {
+    e.stopPropagation();
+    const open = userMenuWrap.classList.toggle("open");
+    userMenu.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  document.addEventListener("click", e => {
+    if (!userMenuWrap.contains(e.target)) {
+      userMenuWrap.classList.remove("open");
+      userMenu.setAttribute("aria-expanded", "false");
+    }
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+      userMenuWrap.classList.remove("open");
+      userMenu.setAttribute("aria-expanded", "false");
+      userMenu.focus();
+    }
+  });
+  document.querySelectorAll("[data-user-action]").forEach(button => {
+    button.addEventListener("click", async e => {
+      const action = e.currentTarget.dataset.userAction;
+      userMenuWrap.classList.remove("open");
+      userMenu.setAttribute("aria-expanded", "false");
+      if (action === "profile") go("profile");
+      if (action === "about") await ask("About Avenza", [], "Close", `<p>Avenza helps students track scholarship applications, examination schedules, required documents, and announcements.</p>`);
+    });
+  });
+}
 
 document.addEventListener("click", async e => {
   const sa = e.target.closest("[data-sa]");

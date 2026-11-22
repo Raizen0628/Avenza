@@ -287,9 +287,66 @@ main {
   padding: 5px 14px 5px 5px;
   border-radius: 999px;
   background: var(--card);
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
 
   font-size: 0.85rem;
   font-weight: 700;
+}
+
+.user-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.user-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 170px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 12px 35px rgba(42,31,92,.14);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity .16s ease, transform .16s ease, visibility .16s;
+  z-index: 30;
+}
+
+.user-menu:hover .user-dropdown,
+.user-menu.open .user-dropdown,
+.user:focus-visible + .user-dropdown {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.user-dropdown button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  font-size: .82rem;
+  cursor: pointer;
+}
+
+.user-dropdown button:hover,
+.user-dropdown button:focus-visible {
+  background: #f1edff;
+  outline: none;
+}
+
+.user-dropdown .logout-menu {
+  color: var(--bad);
 }
 
 .avatar {

@@ -28,11 +28,10 @@ onAuthStateChanged(auth, async function (user) {
   document.body.style.visibility = "visible";
 });
 
-var logout = document.querySelector(".logout");
-if (logout) {
+document.querySelectorAll(".logout, .logout-menu").forEach(function (logout) {
   logout.addEventListener("click", async function (e) {
     e.preventDefault();
     await signOut(auth);
     location.href = "index.html";
   });
-}
+});
